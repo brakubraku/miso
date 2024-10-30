@@ -47,6 +47,7 @@ module Miso.Html.Element
     , dd_
     -- * Embedded Content
     , img_
+    , imgKeyed_
     , iframe_
     , canvas_
     , math_
@@ -434,6 +435,10 @@ dd_ = nodeHtml "dd"
 -- | https://developer.mozilla.org/en-US/docs/Web/HTML/Element/img
 img_ :: [Attribute action] -> View action
 img_ = flip (nodeHtml "img") []
+
+imgKeyed_ :: Key -> [Attribute action] -> View action
+imgKeyed_ k = flip (nodeHtmlKeyed "img" k) []
+
 -- | https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe
 iframe_ :: [Attribute action] -> [View action] -> View action
 iframe_ = nodeHtml "iframe"
