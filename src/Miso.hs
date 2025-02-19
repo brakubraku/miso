@@ -34,6 +34,7 @@ module Miso
   , module Miso.Util
   , module Miso.FFI
   , module Miso.WebSocket
+  , Diff(..)
   ) where
 
 import           Control.Concurrent
@@ -73,10 +74,17 @@ import           Miso.TypeLevel
 import           Miso.Types
 import           Miso.Util
 import           Miso.WebSocket
+import           System.CPUTime
+import           Control.DeepSeq (deepseq, NFData)
+
+import Data.Time
+
+class Diff m where 
+  diffModel :: m -> m -> [String]
 
 -- | Helper function to abstract out common functionality between `startApp` and `miso`
 common
-  :: Eq model
+  :: (Eq model, Diff model)
   => App model action
   -> model
   -> (Sink action -> JSM (IORef VTree))
@@ -127,23 +135,47 @@ common App {..} m getView = do
         newName <- liftIO $ newModel `seq` makeStableName newModel
         when (oldName /= newName && oldModel /= newModel) $ do
           swapCallbacks
-          newVTree <- runView (view newModel) writeEvent
+          let changes = diffModel oldModel newModel
+          liftIO . print $ "benchmark-start"
+          view <- measureCPUTimePure "generating view" $ view newModel changes
+          newVTree <- measureCPUTime "generating VTree from view: " $ 
+                          runView view writeEvent
           oldVTree <- liftIO (readIORef viewRef)
           void $ waitForAnimationFrame
-          (diff mountPoint) (Just oldVTree) (Just newVTree)
+          measureCPUTime "diffing DOM" $ 
+           (diff mountPoint) (Just oldVTree) (Just newVTree)
+          liftIO . print $ "benchmark-end"
           releaseCallbacks
           liftIO (atomicWriteIORef viewRef newVTree)
         syncPoint
         loop newModel
   loop m
 
+measureCPUTimePure :: Control.DeepSeq.NFData a => String -> a -> JSM a
+measureCPUTimePure msg evaluate = do
+  start <- liftIO getCPUTime
+  evaluate `deepseq` pure () -- ensure full evaluation
+  end <- liftIO getCPUTime
+  let time = fromIntegral (end - start) / 1e12 -- Convert picoseconds to seconds
+  liftIO . print $ "benchmark " <> msg <> ": " <> show time
+  pure evaluate
+
+measureCPUTime :: String -> JSM a -> JSM a
+measureCPUTime msg action = do
+  start <- liftIO getCPUTime
+  result <- action
+  end <- liftIO getCPUTime
+  let time = fromIntegral (end - start) / 1e12 -- Convert picoseconds to seconds
+  liftIO . print $ "benchmark " <> msg <> ": " <> show time
+  pure result 
+
 -- | Runs an isomorphic miso application.
 -- Assumes the pre-rendered DOM is already present
-miso :: Eq model => (URI -> App model action) -> JSM ()
+miso :: (Eq model, Diff model) => (URI -> App model action) -> JSM ()
 miso f = do
   app@App {..} <- f <$> getCurrentURI
   common app model $ \writeEvent -> do
-    let initialView = view model
+    let initialView = view model []
     VTree (OI.Object iv) <- flip runView writeEvent initialView
     mountEl <- mountElement mountPoint
     -- Initial diff can be bypassed, just copy DOM into VTree
@@ -153,10 +185,10 @@ miso f = do
     liftIO (newIORef initialVTree)
 
 -- | Runs a miso application
-startApp :: Eq model => App model action -> JSM ()
+startApp :: (Eq model, Diff model) => App model action -> JSM ()
 startApp app@App {..} =
   common app model $ \writeEvent -> do
-    let initialView = view model
+    let initialView = view model []
     initialVTree <- flip runView writeEvent initialView
     (diff mountPoint) Nothing (Just initialVTree)
     liftIO (newIORef initialVTree)

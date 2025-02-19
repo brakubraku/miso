@@ -127,7 +127,7 @@ library
   other-modules:
     Miso.Concurrent
   ghc-options:
-    -Wall
+    -Wall -fno-cse -fno-full-laziness 
   hs-source-dirs:
     src
   if impl(ghcjs) || arch(javascript) || flag (jsstring-only)
@@ -149,8 +149,12 @@ library
     network-uri,
     servant,
     tagsoup,
-    text,
-    transformers
+    text <= 2.1.2,
+    transformers,
+    time,
+    optics,
+    mtl,
+    deepseq
   if impl(ghcjs) || arch(javascript)
     build-depends:
       ghcjs-base

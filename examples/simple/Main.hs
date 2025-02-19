@@ -57,10 +57,18 @@ updateModel SayHelloWorld m = m <# do
   liftIO (putStrLn "Hello World") >> pure NoOp
 
 -- | Constructs a virtual DOM from a model
-viewModel :: Model -> View Action
-viewModel x = div_ [] [
-   button_ [ onClick AddOne ] [ text "+" ]
- , text (ms x)
- , button_ [ onClick SubtractOne ] [ text "-" ]
- , rawHtml "<div><p>hey expandable!</div></p>"
- ]
+viewModel :: Model -> [String] -> View Action
+viewModel x changes =
+   if x > 4
+   then 
+     Cached "someDivs"
+   else 
+     Cache "someDivs" $ 
+       div_ [] $
+        [ button_ [ onClick AddOne ] [ text "+" ]
+        , text (ms x)
+        , button_ [ onClick SubtractOne ] [ text "-" ]
+        ] ++ Prelude.replicate (x^7) (rawHtml "<div><p>hey expandable!</div></p>")
+
+instance Diff Int where 
+  diffModel _ _ = []

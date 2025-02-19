@@ -43,7 +43,7 @@ data App model action = App
   , update :: action -> model -> Effect action model
   -- ^ Function to update model, optionally providing effects.
   --   See the 'Transition' monad for succinctly expressing model transitions.
-  , view :: model -> View action
+  , view :: model -> [String] -> View action
   -- ^ Function to draw `View`
   , subs :: [ Sub action ]
   -- ^ List of subscriptions to run during application lifetime

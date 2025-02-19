@@ -19,7 +19,7 @@ extra-source-files:
 flag jsaddle
   manual: True
   default:
-    False
+    True
   description:
     Compile with JSaddle
 

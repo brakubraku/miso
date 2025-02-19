@@ -50,6 +50,7 @@ module Miso.FFI
    , blur
    , scrollIntoView
    , alert
+   , showJSObject
    ) where
 
 import           Control.Concurrent
@@ -291,3 +292,7 @@ scrollIntoView elId = do
 -- | Calls the @alert()@ function.
 alert :: MisoString -> JSM ()
 alert a = () <$ jsg1 "alert" a
+
+showJSObject :: JSVal -> JSM MisoString
+showJSObject o = 
+  fromJSValUnchecked =<< (jsg "JSON" # "stringify" $ o)

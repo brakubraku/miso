@@ -6,7 +6,10 @@
 {-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE RecordWildCards      #-}
 {-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE TypeApplications     #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE DeriveGeneric, DeriveAnyClass #-}
 
 module Miso.Html.Types (
     -- * Core types and interface
@@ -41,7 +44,7 @@ module Miso.Html.Types (
     ) where
 
 import           Control.Monad              (forM_, (<=<))
-import           Control.Monad.IO.Class     (liftIO)
+import           Control.Monad.IO.Class     (liftIO, MonadIO)
 import           Data.Aeson                 (ToJSON, Value, toJSON)
 import qualified Data.Aeson                 as A
 import           Data.Aeson.Types           (parseEither)
@@ -63,16 +66,25 @@ import           Text.HTML.TagSoup.Tree     (parseTree, TagTree(..))
 import           Text.HTML.TagSoup          (Tag(..))
 
 import           Miso.Effect
-import           Miso.Event
+import           Miso.Event hiding (at)
 import           Miso.FFI
 import           Miso.String                hiding (reverse, elem)
+import           Language.Javascript.JSaddle.Types
+import Optics (at, (&), (^.), (?~))
+import Debug.Trace
+import Control.Concurrent
+import System.IO.Unsafe (unsafePerformIO)
+import GHC.Generics (Generic)
+import Control.DeepSeq
 
 -- | Core type for constructing a `VTree`, use this instead of `VTree` directly.
 data View action
     = Node NS MisoString (Maybe Key) [Attribute action] [View action]
     | Text MisoString
     | TextRaw MisoString
-    deriving Functor
+    | Cached String 
+    | Cache String (View action) 
+  deriving (Functor, Generic, NFData)
 
 -- | For constructing type-safe links
 instance HasLink (View a) where
@@ -97,7 +109,6 @@ rawHtml
   :: MisoString
   -> View action
 rawHtml = TextRaw
-
 
 -- | Create a new @Miso.Html.Types.Node@.
 --
@@ -171,6 +182,7 @@ instance L.ToHtml (View action) where
   toHtml (TextRaw x)
     | null x = L.toHtml (" " :: T.Text)
     | otherwise = L.toHtmlRaw (fromMisoString x :: T.Text)
+  toHtml _ = L.toHtml ("error, this should not happen" :: T.Text)
 
 collapseSiblingTextNodes :: [View a] -> [View a]
 collapseSiblingTextNodes [] = []
@@ -195,7 +207,43 @@ toHtmlFromJSON (A.Array a) = T.pack (show a)
 --   Not meant to be constructed directly, see `View` instead.
 newtype VTree = VTree { getTree :: Object }
 
+{-# NOINLINE viewCache #-}
+viewCache :: MVar (M.Map String VTree)
+viewCache = unsafePerformIO $ do
+  newMVar M.empty
+
+cacheView :: MonadIO m => String -> VTree -> m VTree
+cacheView name vtree = 
+ trace ("cache-updating-key: " <> show name) $ liftIO $
+  do
+    let !evaluated = vtree 
+    modifyMVar_ viewCache $ \cache ->
+      pure $ cache & at name ?~ evaluated
+    pure evaluated
+
+getCachedView :: String -> JSM VTree
+getCachedView name = trace ("cache-hit-for: " <> show name) $ 
+  do
+    empty <- VTree <$> create
+    liftIO $ 
+     do
+      cache <- readMVar viewCache
+      maybe 
+       (print ("cache-empty-for: " <> show name) >> pure empty) 
+       pure 
+       (cache ^. at name)
+
 runView :: View action -> Sink action -> JSM VTree
+runView (Cached name) _ = do
+  vtree <- getCachedView name
+  -- obj <- showJSObject =<< toJSVal (getTree vtree)
+  -- liftIO . print $ "branko-object: " <> show obj
+  pure vtree
+runView (Cache name view) sink = do 
+  vtree <- runView view sink
+  cacheView name vtree
+  pure vtree
+
 runView (Node ns tag key attrs kids) sink = do
   vnode <- create
   cssObj <- objectToJSVal =<< create
@@ -271,7 +319,7 @@ data NS
   = HTML -- ^ HTML Namespace
   | SVG  -- ^ SVG Namespace
   | MATHML  -- ^ MATHML Namespace
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic, NFData)
 
 instance ToJSVal NS where
   toJSVal SVG  = toJSVal ("svg" :: JSString)
@@ -285,7 +333,7 @@ instance ToJSVal NS where
 -- of a given DOM node must be unique. Failure to satisfy this
 -- invariant gives undefined behavior at runtime.
 newtype Key = Key MisoString
-
+  deriving (Generic, NFData)
 instance ToJSVal Key where toJSVal (Key x) = toJSVal x
 
 -- | Convert custom key types to `Key`.
@@ -321,7 +369,7 @@ data Attribute action
     = P MisoString Value
     | E (Sink action -> Object -> JSM ())
     | S (M.Map MisoString MisoString)
-    deriving Functor
+    deriving (Functor, Generic, NFData)
 
 -- | @prop k v@ is an attribute that will set the attribute @k@ of the DOM node associated with the vnode
 -- to @v@.
