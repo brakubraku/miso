@@ -44,7 +44,8 @@ common js-only-tests
     buildable: False
 
 common string-selector
-  if impl(ghcjs) || arch(javascript) || flag (jsstring-only) || arch(wasm32)
+  if impl(ghcjs) || arch(javascript) || flag (jsstring-only) 
+  -- if impl(ghcjs) || arch(javascript) || flag (jsstring-only) || arch(wasm32)
     hs-source-dirs:
       jsstring-src
   else
