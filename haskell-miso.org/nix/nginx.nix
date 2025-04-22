@@ -41,7 +41,7 @@ with (import ../../default.nix {});
           enableACME = true;
           locations = {
           "/" = {
-            root = "${pkgs.coverage}/lcov-report";
+            root = coverage;
            };
          };
        };
@@ -50,7 +50,7 @@ with (import ../../default.nix {});
           enableACME = true;
           locations = {
           "/" = {
-            root = "${miso-ghcjs.doc}/share/doc/miso-1.8.7.0/html";
+            root = "${miso-ghcjs.doc}/share/doc/miso-1.9.0.0/html";
            };
          };
        };
@@ -59,7 +59,7 @@ with (import ../../default.nix {});
           enableACME = true;
           locations = {
           "/" = {
-            root = "${pkgs.more-examples.flatris}/bin/app.jsexe";
+            root = "${more-examples.flatris}/bin/app.jsexe";
            };
          };
        };
@@ -68,7 +68,7 @@ with (import ../../default.nix {});
           enableACME = true;
           locations = {
           "/" = {
-            root = pkgs.more-examples.miso-plane;
+            root = more-examples.miso-plane;
            };
          };
        };
@@ -77,7 +77,7 @@ with (import ../../default.nix {});
           enableACME = true;
           locations = {
           "/" = {
-            root = pkgs.more-examples.the2048;
+            root = more-examples.hs2048;
            };
          };
        };
@@ -95,7 +95,7 @@ with (import ../../default.nix {});
           enableACME = true;
           locations = {
           "/" = {
-            root = "${pkgs.more-examples.snake}/bin/app.jsexe";
+            root = "${more-examples.snake}/bin/app.jsexe";
            };
          };
        };
@@ -153,12 +153,12 @@ with (import ../../default.nix {});
            };
          };
        };
-       "xhr.haskell-miso.org" = {
+       "fetch.haskell-miso.org" = {
           forceSSL = true;
           enableACME = true;
           locations = {
           "/" = {
-            root = "${miso-examples}/bin/xhr.jsexe";
+            root = "${miso-examples}/bin/fetch.jsexe";
            };
          };
        };

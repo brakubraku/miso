@@ -12,7 +12,7 @@
 -- @
 -- @
 --
--- More information on how to use `miso` is available on GitHub
+-- More information on how to use miso is available on GitHub
 --
 -- <http://github.com/dmjio/miso>
 --
@@ -20,5 +20,6 @@
 module Miso.Mathml
    ( module Miso.Mathml.Element
    ) where
-
+-----------------------------------------------------------------------------
 import Miso.Mathml.Element
+-----------------------------------------------------------------------------

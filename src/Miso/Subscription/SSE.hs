@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards   #-}
+-----------------------------------------------------------------------------
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 -----------------------------------------------------------------------------
@@ -11,39 +11,35 @@
 -- Portability :  non-portable
 ----------------------------------------------------------------------------
 module Miso.Subscription.SSE
- ( -- * Subscription
+ ( -- *** Subscription
    sseSub
-   -- * Types
+   -- *** Types
  , SSE (..)
  ) where
-
-import           Control.Monad.IO.Class
+-----------------------------------------------------------------------------
 import           Data.Aeson
-import           Miso.Types (Sub)
-import           Miso.FFI
+import           Miso.Effect (Sub)
+import qualified Miso.FFI.Internal as FFI
 import           Miso.String
-
+-----------------------------------------------------------------------------
 import qualified Miso.FFI.SSE as SSE
-
+-----------------------------------------------------------------------------
 -- | Server-sent events Subscription
 sseSub :: FromJSON msg => MisoString -> (SSE msg -> action) -> Sub action
 sseSub url f = \sink -> do
   es <- SSE.new url
   SSE.addEventListener es "message" $ \val -> do
-    dat <- parse =<< SSE.data' val
-    (liftIO . sink) (f (SSEMessage dat))
+    dat <- FFI.jsonParse =<< SSE.data' val
+    sink (f (SSEMessage dat))
   SSE.addEventListener es "error" $ \_ ->
-    (liftIO . sink) (f SSEError)
+    sink (f SSEError)
   SSE.addEventListener es "close" $ \_ ->
-    (liftIO . sink) (f SSEClose)
-
+    sink (f SSEClose)
+-----------------------------------------------------------------------------
 -- | Server-sent events data
 data SSE message
   = SSEMessage message
   | SSEClose
   | SSEError
   deriving (Show, Eq)
-
--- | Test URL
--- http://sapid.sourceforge.net/ssetest/webkit.events.php
--- var source = new EventSource("demo_sse.php");
+-----------------------------------------------------------------------------

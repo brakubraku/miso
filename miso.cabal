@@ -1,6 +1,6 @@
 cabal-version:       2.2
 name:                miso
-version:             1.8.7.0
+version:             1.9.0.0
 category:            Web, Miso, Data Structures
 license:             BSD-3-Clause
 license-file:        LICENSE
@@ -13,7 +13,7 @@ build-type:          Simple
 extra-source-files:  README.md
 synopsis:            A tasty Haskell front-end web framework
 description:
-            Miso is a small, production-ready, "isomorphic" Haskell front-end framework featuring a virtual-dom, recursive diffing / patching algorithm, event delegation, event batching, SVG, Server-sent events, Websockets, type-safe servant-style routing and an extensible Subscription-based subsystem. Inspired by Elm, Redux and Bobril. Miso is pure by default, but side effects (like XHR) can be introduced into the system via the Effect data type. Miso makes heavy use of the GHCJS FFI and therefore has minimal dependencies.
+            Miso is a small, production-ready, component-oriented, isomorphic Haskell front-end framework featuring a virtual-dom, recursive diffing / patching algorithm, event delegation, event batching, SVG, Server-sent events, Websockets, type-safe servant-style routing and an extensible Subscription-based subsystem. Inspired by Elm and React. Miso is pure by default, but side effects can be introduced into the system via the Effect data type. Miso makes heavy use of the GHC FFI and therefore has minimal dependencies.
 
 extra-source-files:
   README.md
@@ -38,6 +38,9 @@ common cpp
   else
     cpp-options:
       -DNATIVE
+  if flag(production)
+    cpp-options:
+      -DPRODUCTION
 
 common js-only-tests
   if !(impl(ghcjs) || arch(javascript)) || !flag(tests)
@@ -55,27 +58,37 @@ common string-selector
 common jsaddle
   if !(impl(ghcjs) || arch(javascript) || arch(wasm32))
     build-depends:
-      jsaddle-warp
+      jsaddle-warp < 0.10
 
   if !(impl(ghcjs) || arch(javascript))
     build-depends:
-      file-embed
+      file-embed < 0.1
 
   if arch(wasm32)
     build-depends:
-      jsaddle-wasm
+      jsaddle-wasm < 0.2
 
 common client
   if impl(ghcjs) || arch(javascript)
     build-depends:
-      ghcjs-base
+      ghcjs-base -any
 
   if impl(ghcjs) || arch(javascript) || arch(wasm32)
-    js-sources:
-      jsbits/diff.js
-      jsbits/delegate.js
-      jsbits/isomorphic.js
-      jsbits/util.js
+    if flag(production)
+      js-sources:
+        js/miso.prod.js
+    else
+      js-sources:
+        js/miso.js
+
+flag production
+  manual:
+    True
+  default:
+    False
+  description:
+    Uses miso's production quality JS (miso.prod.js).
+    This is built from calling "bun build --production"
 
 flag tests
   manual:
@@ -95,7 +108,7 @@ flag jsstring-only
 
 executable tests
   import:
-    js-only-tests
+    js-only-tests, cpp
   default-language:
     Haskell2010
   main-is:
@@ -133,30 +146,34 @@ library
     cpp
   default-language:
     Haskell2010
-  exposed-modules:
-    Miso
+  other-modules:
     Miso.Concurrent
-    Miso.Dev
-    Miso.Html
     Miso.Delegate
     Miso.Diff
     Miso.Effect
     Miso.Event
     Miso.Event.Decoder
     Miso.Event.Types
-    Miso.Html.Element
-    Miso.Html.Event
-    Miso.Html.Property
-    Miso.Html.Types
-    Miso.Mathml
-    Miso.Mathml.Element
+    Miso.Exception
+    Miso.Fetch
     Miso.FFI
     Miso.FFI.History
     Miso.FFI.SSE
     Miso.FFI.Storage
     Miso.FFI.WebSocket
+    Miso.FFI.Internal
+    Miso.Html
+    Miso.Html.Element
+    Miso.Html.Event
+    Miso.Html.Property
+    Miso.Html.Types
+    Miso.Internal
+    Miso.Mathml
+    Miso.Mathml.Element
+    Miso.Render
     Miso.Router
-    Miso.Runner
+    Miso.Run
+    Miso.Storage
     Miso.Subscription
     Miso.Subscription.History
     Miso.Subscription.Keyboard
@@ -164,32 +181,33 @@ library
     Miso.Subscription.WebSocket
     Miso.Subscription.Window
     Miso.Subscription.SSE
-    Miso.Storage
-    Miso.Svg
     Miso.Svg.Attribute
     Miso.Svg.Element
     Miso.Svg.Event
-    Miso.String
     Miso.Types
     Miso.Util
     Miso.WebSocket
-  other-modules:
-    Miso.Internal
+  exposed-modules:
+    Miso
+    Miso.Lens
+    Miso.Svg
+    Miso.String
   ghc-options:
     -Wall
   hs-source-dirs:
     src
   build-depends:
-    aeson,
-    base < 5,
-    bytestring,
-    containers,
-    http-api-data,
-    http-types,
-    jsaddle,
-    lucid,
-    network-uri,
-    servant,
-    tagsoup,
-    text,
-    transformers
+    aeson         < 2.3,
+    base          < 5,
+    bytestring    < 0.13,
+    containers    < 0.9,
+    http-api-data < 0.9,
+    http-media    < 0.9,
+    http-types    < 0.13,
+    jsaddle       < 0.10,
+    mtl           < 2.4,
+    network-uri   < 2.7,
+    servant       < 0.21,
+    tagsoup       < 0.15,
+    text          < 2.2,
+    transformers  < 0.7,

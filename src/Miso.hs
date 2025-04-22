@@ -1,16 +1,11 @@
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE BangPatterns        #-}
-{-# LANGUAGE CPP                 #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE RecordWildCards     #-}
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE KindSignatures      #-}
-{-# LANGUAGE TemplateHaskell     #-}
+-----------------------------------------------------------------------------
+{-# LANGUAGE CPP             #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso
--- Copyright   :  (C) 2016-2025 David M. Johnson
+-- Copyright   :  (C) 2016-2025 David M. Johnson (@dmjio)
 -- License     :  BSD3-style (see the file LICENSE)
 -- Maintainer  :  David M. Johnson <code@dmj.io>
 -- Stability   :  experimental
@@ -18,109 +13,112 @@
 ----------------------------------------------------------------------------
 module Miso
   ( -- * Miso
+    -- ** Combinators
     miso
   , startApp
-  , startComponent
-  , misoComponent
-    -- * Third-party integration helpers
+    -- ** Sink
   , sink
-  , sinkRaw
-    -- * Component communication
+    -- ** Sampling
+  , sample
+    -- ** Message Passing
   , notify
-  , mail
-    -- * Abstraction for jsaddle
-  , run
-  , Component
-  , module Export
+  , module Miso.Types
+    -- * Effect
+  , module Miso.Effect
+    -- * Event
+  , module Miso.Event
+    -- * Html
+  , module Miso.Html
+  , module Miso.Render
+    -- * Mathml
+  , module Miso.Mathml
+    -- * Router
+  , module Miso.Router
+    -- * Run
+  , module Miso.Run
+    -- * Exception
+  , module Miso.Exception
+    -- * Subs
+  , module Miso.Subscription
+    -- * Storage
+  , module Miso.Storage
+    -- * Fetch
+  , module Miso.Fetch
+    -- * Util
+  , module Miso.Util
+    -- * FFI
+  , module Miso.FFI
   ) where
-
-import           Control.Monad
-import           Control.Monad.IO.Class
-import           Data.IORef
-import           Language.Javascript.JSaddle
-
-import           Miso.Diff (diff, mountElement)
-import           Miso.FFI
-import           Miso.Types (Component(Component))
-import           Miso.Internal
-
-import           Miso.Event as Export
-import           Miso.Html as Export
-import           Miso.Router as Export
-import           Miso.Runner as Runner
-import           Miso.Storage as Export
-import           Miso.Subscription as Export
-import           Miso.Types as Export hiding (Component(Component))
-import           Miso.Util as Export
-import           Miso.FFI as Export
-
+-----------------------------------------------------------------------------
+import           Control.Monad (void)
+import           Control.Monad.IO.Class (liftIO)
+import           Data.IORef (newIORef)
+import           Language.Javascript.JSaddle (Object(Object), JSM)
 #ifndef GHCJS_BOTH
-import           Data.FileEmbed
+import           Data.FileEmbed (embedStringFile)
+import           Language.Javascript.JSaddle (eval)
+import           Miso.String (MisoString)
 #endif
-
+-----------------------------------------------------------------------------
+import           Miso.Diff
+import           Miso.Effect
+import           Miso.Event
+import           Miso.Exception
+import           Miso.Fetch
+import           Miso.FFI
+import qualified Miso.FFI.Internal as FFI
+import           Miso.Html
+import           Miso.Internal
+import           Miso.Mathml
+import           Miso.Render
+import           Miso.Router
+import           Miso.Run
+import           Miso.Storage
+import           Miso.Subscription
+import           Miso.Types
+import           Miso.Util
+-----------------------------------------------------------------------------
 -- | Runs an isomorphic miso application.
--- Assumes the pre-rendered DOM is already present
+-- Assumes the pre-rendered DOM is already present.
+-- Note: Uses @mountPoint@ as the @Component@ name.
+-- Always mounts to /<body>/. Copies page into the virtual DOM.
 miso :: Eq model => (URI -> App model action) -> JSM ()
 miso f = withJS $ do
-  app@App {..} <- f <$> getCurrentURI
-  common app $ \snk -> do
-    VTree (Object iv) <- runView Prerender (view model) snk
-    let mount = getMountPoint mountPoint
-    mountEl <- mountElement mount
-    -- Initial diff can be bypassed, just copy DOM into VTree
-    copyDOMIntoVTree (logLevel == DebugPrerender) mountEl iv
-    ref <- liftIO $ newIORef $ VTree (Object iv)
-    registerSink mount mountEl ref snk
-    pure (mount, mountEl, ref)
-
--- | Runs a miso application (as a @Component@)
--- Note: uses the 'name' as the key in @componentMap@
--- Mounts to `body`. Copies page into the virtual dom.
-misoComponent
-  :: Eq model
-  => (URI -> Component name model action)
-  -> JSM ()
-misoComponent f = withJS $ do
-  Component name app@App {..} <- f <$> getCurrentURI
-  common app $ \snk -> do
-    vtree@(VTree (Object jval)) <- runView Prerender (view model) snk
-    mount <- getBody
-    setBodyComponent name
-    copyDOMIntoVTree (logLevel == DebugPrerender) mount jval
-    ref <- liftIO (newIORef vtree)
-    registerSink name mount ref snk
-    pure (name, mount, ref)
-
+  app@App {..} <- f <$> getURI
+  initialize app $ \snk -> do
+    renderStyles styles
+    VTree (Object vtree) <- runView Prerender (view model) snk logLevel events
+    let name = getMountPoint mountPoint
+    FFI.setBodyComponent name
+    mount <- FFI.getBody
+    FFI.hydrate (logLevel `elem` [DebugPrerender, DebugAll]) mount vtree
+    viewRef <- liftIO $ newIORef $ VTree (Object vtree)
+    pure (name, mount, viewRef)
+-----------------------------------------------------------------------------
 -- | Runs a miso application
+-- Initializes application at @mountPoint@ (defaults to /<body>/ when @Nothing@)
 startApp :: Eq model => App model action -> JSM ()
 startApp app@App {..} = withJS $
-  common app $ \snk -> do
-    vtree <- runView DontPrerender (view model) snk
-    let mount = getMountPoint mountPoint
-    mountEl <- mountElement mount
-    diff mountEl Nothing (Just vtree)
-    ref <- liftIO (newIORef vtree)
-    registerSink mount mountEl ref snk
-    pure (mount, mountEl, ref)
-
--- | Runs a miso application (as a @Component@)
--- Note: uses the 'name' as the mount point.
-startComponent :: Eq model => Component name model action -> JSM ()
-startComponent (Component name app@App{..}) = withJS $ common app $ \snk -> do
-  vtree <- runView DontPrerender (view model) snk
-  mount <- getBody
-  setBodyComponent name
-  diff mount Nothing (Just vtree)
-  ref <- liftIO (newIORef vtree)
-  registerSink name mount ref snk
-  pure (name, mount, ref)
-
+  initialize app $ \snk -> do
+    renderStyles styles
+    vtree <- runView DontPrerender (view model) snk logLevel events
+    let name = getMountPoint mountPoint
+    FFI.setBodyComponent name
+    mount <- mountElement name
+    diff mount Nothing (Just vtree)
+    viewRef <- liftIO (newIORef vtree)
+    pure (name, mount, viewRef)
+-----------------------------------------------------------------------------
+-- | Used when compiling with jsaddle to make miso's JavaScript present in
+-- the execution context.
 withJS :: JSM a -> JSM ()
 withJS action = void $ do
 #ifndef GHCJS_BOTH
-  _ <- eval ($(embedStringFile "jsbits/delegate.js") :: JSString)
-  _ <- eval ($(embedStringFile "jsbits/diff.js") :: JSString)
-  _ <- eval ($(embedStringFile "jsbits/isomorphic.js") :: JSString)
-  _ <- eval ($(embedStringFile "jsbits/util.js") :: JSString)
+#ifdef PRODUCTION
+  _ <- eval ($(embedStringFile "js/miso.prod.js") :: MisoString)
+#else
+  _ <- eval ($(embedStringFile "js/miso.js") :: MisoString)
+#endif
 #endif
   action
+-----------------------------------------------------------------------------

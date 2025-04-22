@@ -1,14 +1,17 @@
 {}:
 with (import ../default.nix {});
 let
-  src = import ../nix/haskell/packages/source.nix pkgs;
+  sources = import ../nix/source.nix pkgs;
   inherit (pkgs) runCommand closurecompiler;
-  inherit (pkgs.haskell.packages) ghcjs86 ghc865;
-  client = ghcjs86.callCabal2nix "haskell-miso" (src.haskell-miso-src) {};
-  server = ghc865.callCabal2nix "haskell-miso" (src.haskell-miso-src) {};
+  ghc = legacyPkgs.haskell.packages.ghc865;
+  ghcjs = legacyPkgs.haskell.packages.ghcjs;
+  client = ghcjs.callCabal2nix "haskell-miso" (sources.haskell-miso) {};
+  server = ghc.callCabal2nix "haskell-miso" (sources.haskell-miso) {};
+  dev = ghc.callCabal2nixWithOptions "haskell-miso" (sources.haskell-miso) "-fdev" {};
 in
 { haskell-miso-client = client;
   haskell-miso-server = server;
+  haskell-miso-dev = dev;
   haskell-miso-runner = 
     runCommand "haskell-miso.org" { inherit client server; } ''
       mkdir -p $out/{bin,static}

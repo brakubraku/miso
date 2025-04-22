@@ -1,55 +1,64 @@
--- | Haskell language pragma
+----------------------------------------------------------------------------
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE CPP #-}
-
--- | Haskell module declaration
+{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE CPP               #-}
+----------------------------------------------------------------------------
 module Main where
-
--- | Miso framework import
+----------------------------------------------------------------------------
 import Miso
 import Miso.String
-
--- | Type synonym for an application model
-type Model = Int
-
--- | Sum type for application events
+import Miso.Lens
+----------------------------------------------------------------------------
+-- | Application model state
+data Model
+  = Model
+  { _counter :: Int
+  } deriving (Show, Eq)
+----------------------------------------------------------------------------
+counter :: Lens Model Int
+counter = lens _counter $ \record field -> record { _counter = field }
+----------------------------------------------------------------------------
+-- | Sum type for App events
 data Action
   = AddOne
   | SubtractOne
-  | NoOp
   | SayHelloWorld
   deriving (Show, Eq)
-
-#if defined(wasm32_HOST_ARCH)
-foreign export javascript "hs_start" main :: IO ()
-#endif
-
+----------------------------------------------------------------------------
 -- | Entry point for a miso application
 main :: IO ()
-main = startApp App {..}
-  where
-    initialAction = SayHelloWorld -- initial action to be executed on application load
-    model  = 0                    -- initial model
-    update = updateModel          -- update function
-    view   = viewModel            -- view function
-    events = defaultEvents        -- default delegated events
-    subs   = []                   -- empty subscription list
-    mountPoint = Nothing          -- mount point for application (Nothing defaults to 'body')
-    logLevel = Off                -- used during prerendering to see if the VDOM and DOM are in sync (only used with `miso` function)
-
+main = run (startApp app)
+----------------------------------------------------------------------------
+-- | WASM export, required when compiling w/ the WASM backend.
+#ifdef WASM
+foreign export javascript "hs_start" main :: IO ()
+#endif
+----------------------------------------------------------------------------
+-- | `defaultApp` takes as arguments the initial model, update function, view function
+app :: App Model Action
+app = defaultApp emptyModel updateModel viewModel
+----------------------------------------------------------------------------
+-- | Empty application state
+emptyModel :: Model
+emptyModel = Model 0
+----------------------------------------------------------------------------
 -- | Updates model, optionally introduces side effects
-updateModel :: Action -> Model -> Effect Action Model
-updateModel AddOne m = noEff (m + 1)
-updateModel SubtractOne m = noEff (m - 1)
-updateModel NoOp m = noEff m
-updateModel SayHelloWorld m = m <# do
-  putStrLn "Hello World" >> pure NoOp
-
+updateModel :: Action -> Effect Model Action
+updateModel = \case
+  AddOne        -> counter += 1
+  SubtractOne   -> counter -= 1
+  SayHelloWorld -> io $ do
+    alert "Hello World"
+    consoleLog "Hello World"
+----------------------------------------------------------------------------
 -- | Constructs a virtual DOM from a model
 viewModel :: Model -> View Action
-viewModel x = div_ [] [
-   button_ [ onClick AddOne ] [ text "+" ]
- , text (ms x)
- , button_ [ onClick SubtractOne ] [ text "-" ]
- ]
+viewModel x = div_ []
+  [ button_ [ onClick AddOne ] [ text "+" ]
+  , text . ms $ x^.counter
+  , button_ [ onClick SubtractOne ] [ text "-" ]
+  , br_ []
+  , button_ [ onClick SayHelloWorld ] [ text "Alert Hello World!" ]
+  ]
+----------------------------------------------------------------------------

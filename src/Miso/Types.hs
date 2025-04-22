@@ -1,14 +1,12 @@
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ScopedTypeVariables       #-}
-{-# LANGUAGE TypeApplications          #-}
-{-# LANGUAGE DeriveFunctor             #-}
+-----------------------------------------------------------------------------
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE LambdaCase                #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
 {-# LANGUAGE OverloadedStrings         #-}
-{-# LANGUAGE UndecidableInstances      #-}
-{-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE FlexibleInstances         #-}
-{-# LANGUAGE TypeSynonymInstances      #-}
+{-# LANGUAGE TypeApplications          #-}
+{-# LANGUAGE RecordWildCards           #-}
+{-# LANGUAGE DeriveFunctor             #-}
+{-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE DataKinds                 #-}
 -----------------------------------------------------------------------------
 -- |
@@ -20,76 +18,49 @@
 -- Portability :  non-portable
 ----------------------------------------------------------------------------
 module Miso.Types
-  ( -- * App
+  ( -- ** Types
     App              (..)
-  , defaultApp
-  -- * View
   , View             (..)
-  , ToView           (..)
-  -- * Key
   , Key              (..)
-  , toKey
-  -- * Attribute
   , Attribute        (..)
   , NS               (..)
+  , CSS              (..)
   , LogLevel         (..)
-  -- * Components
   , Component        (..)
   , SomeComponent    (..)
-  , ComponentOptions (..)
+  -- ** Classes
+  , ToView           (..)
+  , ToKey            (..)
+  -- ** Functions
+  , defaultApp
   , component
   , embed
-  , embedWith
+  , embedKeyed
   , getMountPoint
-  , componentOptions
-    -- * The Transition Monad
-  , Transition
-  , mapAction
-  , fromTransition
-  , toTransition
-  , scheduleIO
-  , scheduleIO_
-  , scheduleIOFor_
-  , scheduleSub
-  -- * The Effect Monad
-  , module Miso.Effect
   ) where
-
-import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class (lift)
-import           Control.Monad.Trans.State.Strict (StateT(StateT), execStateT, mapStateT)
-import           Control.Monad.Trans.Writer.Strict (Writer, tell, mapWriter, runWriter)
+-----------------------------------------------------------------------------
 import           Data.Aeson (Value)
-import qualified Data.Aeson as A
-import           Data.Bifunctor (second, Bifunctor(..))
-import           Data.Foldable (for_)
 import           Data.JSString (JSString)
+import           Data.Kind (Type)
 import qualified Data.Map.Strict as M
 import           Data.Maybe (fromMaybe)
-import           Data.Proxy
 import           Data.String (IsString, fromString)
 import qualified Data.Text as T
-import           GHC.TypeLits (KnownSymbol, symbolVal, Symbol)
-import           GHCJS.Marshal (ToJSVal, toJSVal)
-import           JavaScript.Object.Internal (Object)
-import qualified Lucid as L
-import qualified Lucid.Base as L
+import           Language.Javascript.JSaddle (ToJSVal(toJSVal), Object, JSM)
 import           Prelude hiding (null)
-import           Servant.API (Get, HasLink(MkLink, toLink))
-
-import           Miso.Effect
+import           Servant.API (HasLink(MkLink, toLink))
+-----------------------------------------------------------------------------
+import           Miso.Effect (Effect, Sub, Sink)
 import           Miso.Event.Types
-import           Miso.FFI (JSM)
-import           Miso.String (MisoString, fromMisoString, toMisoString)
-import qualified Miso.String as MS
-
+import           Miso.String (MisoString, toMisoString)
+-----------------------------------------------------------------------------
 -- | Application entry point
 data App model action = App
   { model :: model
   -- ^ initial model
-  , update :: action -> model -> Effect action model
+  , update :: action -> Effect model action
   -- ^ Function to update model, optionally providing effects.
-  --   See the 'Transition' monad for succinctly expressing model transitions.
+  --   See the @Transition@ monad for succinctly expressing model transitions.
   , view :: model -> View action
   -- ^ Function to draw `View`
   , subs :: [ Sub action ]
@@ -97,211 +68,149 @@ data App model action = App
   , events :: M.Map MisoString Bool
   -- ^ List of delegated events that the body element will listen for.
   --   You can start with 'Miso.Event.Types.defaultEvents' and modify as needed.
-  , initialAction :: action
-  -- ^ Initial action that is run after the application has loaded
+  , styles :: [CSS]
+  -- ^ List of CSS styles expressed as either a URL ('Href') or as 'Style' text.
+  -- These styles are appended dynamically to the <head> section of your HTML page
+  -- before the initial draw on <body> occurs.
+  , initialAction :: Maybe action
+  -- ^ Initial action that is run after the application has loaded, optional since *1.9*
   , mountPoint :: Maybe MisoString
-  -- ^ Id of the root element for DOM diff. If 'Nothing' is provided, the entire document body is used as a mount point.
+  -- ^ Id of the root element for DOM diff.
+  -- If 'Nothing' is provided, the entire document body is used as a mount point.
   , logLevel :: LogLevel
+  -- ^ Debugging for prerendering and event delegation
   }
-
+-----------------------------------------------------------------------------
+-- | Allow users to express CSS and append it to <head> before the first draw
+--
+-- > Href "http://domain.com/style.css
+--
+data CSS
+  = Href MisoString
+  -- ^ 'Href' is a URL meant to link to hosted CSS
+  | Style MisoString
+  -- ^ 'Style' is meant to be raw CSS in a 'style_' tag
+  deriving (Show, Eq)
+-----------------------------------------------------------------------------
 -- | Convenience for extracting mount point
 getMountPoint :: Maybe MisoString -> MisoString
 getMountPoint = fromMaybe "body"
-
+-----------------------------------------------------------------------------
 -- | Smart constructor for @App@ with sane defaults.
 defaultApp
   :: model
-  -> (action -> model -> Effect action model)
+  -> (action -> Effect model action)
   -> (model -> View action)
-  -> action
   -> App model action
-defaultApp m u v a = App
-  { initialAction = a
-  , model = m
-  , view = v
+defaultApp m u v = App
+  { model = m
   , update = u
+  , view = v
   , subs = []
   , events = defaultEvents
+  , styles = []
   , mountPoint = Nothing
   , logLevel = Off
+  , initialAction = Nothing
   }
-
+-----------------------------------------------------------------------------
 -- | Optional Logging for debugging miso internals (useful to see if prerendering is successful)
 data LogLevel
   = Off
   | DebugPrerender
+  -- ^ Will warn if the structure or properties of the
+  -- DOM vs. Virtual DOM differ during prerendering.
+  | DebugEvents
+  -- ^ Will warn if an event cannot be routed to the Haskell event
+  -- handler that raised it. Also will warn if an event handler is
+  -- being used, yet it's not being listened for by the event
+  -- delegator mount point.
+  | DebugAll
+  -- ^ Logs on all of the above
   deriving (Show, Eq)
-
--- | A monad for succinctly expressing model transitions in the 'update' function.
---
--- @Transition@ is a state monad so it abstracts over manually passing the model
--- around. It's also a writer monad where the accumulator is a list of scheduled
--- IO actions. Multiple actions can be scheduled using
--- @Control.Monad.Writer.Class.tell@ from the @mtl@ library and a single action
--- can be scheduled using 'scheduleIO'.
---
--- Tip: use the @Transition@ monad in combination with the stateful
--- <http://hackage.haskell.org/package/lens-4.15.4/docs/Control-Lens-Operators.html lens>
--- operators (all operators ending in "@=@"). The following example assumes
--- the lenses @field1@, @counter@ and @field2@ are in scope and that the
--- @LambdaCase@ language extension is enabled:
---
--- @
--- myApp = App
---   { update = 'fromTransition' . \\case
---       MyAction1 -> do
---         field1 .= value1
---         counter += 1
---       MyAction2 -> do
---         field2 %= f
---         scheduleIO $ do
---           putStrLn \"Hello\"
---           putStrLn \"World!\"
---   , ...
---   }
--- @
-type Transition action model = StateT model (Writer [Sub action])
-
--- | Turn a transition that schedules subscriptions that consume
--- actions of type @a@ into a transition that schedules subscriptions
--- that consume actions of type @b@ using the supplied function of
--- type @a -> b@.
-mapAction :: (actionA -> actionB) -> Transition actionA model r -> Transition actionB model r
-mapAction = mapStateT . mapWriter . second . fmap . mapSub
-
--- | Convert a @Transition@ computation to a function that can be given to 'update'.
-fromTransition
-    :: Transition action model ()
-    -> (model -> Effect action model) -- ^ model 'update' function.
-fromTransition act = \m ->
-  case runWriter (execStateT act m) of
-    (n, actions) -> Effect n actions
-
--- | Convert an 'update' function to a @Transition@ computation.
-toTransition
-    :: (model -> Effect action model) -- ^ model 'update' function
-    -> Transition action model ()
-toTransition f =
-  StateT $ \m ->
-    case f m of
-      Effect n actions -> do
-        tell actions
-        pure ((), n)
-
--- | Schedule a single IO action for later execution.
---
--- Note that multiple IO action can be scheduled using
--- @Control.Monad.Writer.Class.tell@ from the @mtl@ library.
-scheduleIO :: JSM action -> Transition action model ()
-scheduleIO ioAction = scheduleSub $ \sink -> ioAction >>= liftIO . sink
-
--- | Like 'scheduleIO' but doesn't cause an action to be dispatched to
--- the 'update' function.
---
--- This is handy for scheduling IO computations where you don't care
--- about their results or when they complete.
-scheduleIO_ :: JSM () -> Transition action model ()
-scheduleIO_ ioAction = scheduleSub $ \_sink -> ioAction
-
--- | Like `scheduleIO_` but generalized to any instance of `Foldable`
---
--- This is handy for scheduling IO computations that return a `Maybe` value
-scheduleIOFor_ :: Foldable f => JSM (f action) -> Transition action model ()
-scheduleIOFor_ io = scheduleSub $ \sink -> io >>= \m -> liftIO (for_ m sink)
-
--- | Like 'scheduleIO' but schedules a subscription which is an IO
--- computation that has access to a 'Sink' which can be used to
--- asynchronously dispatch actions to the 'update' function.
---
--- A use-case is scheduling an IO computation which creates a
--- 3rd-party JS widget which has an associated callback. The callback
--- can then call the sink to turn events into actions. To do this
--- without accessing a sink requires going via a @'Sub'scription@
--- which introduces a leaky-abstraction.
-scheduleSub :: Sub action -> Transition action model ()
-scheduleSub sub = lift $ tell [ sub ]
-
--- | Core type for constructing a `VTree`, use this instead of `VTree` directly.
+-----------------------------------------------------------------------------
+-- | Core type for constructing a virtual DOM in Haskell
 data View action
   = Node NS MisoString (Maybe Key) [Attribute action] [View action]
   | Text MisoString
   | TextRaw MisoString
-  | Embed SomeComponent (ComponentOptions action)
+  | Embed [Attribute action] SomeComponent
   deriving Functor
-
--- | Options for Components, used with @embedWith@
--- Components are implemented as `div`.
-data ComponentOptions action
-  = ComponentOptions
-  { onMounted :: Maybe action
-  , onUnmounted :: Maybe action
-  , attributes :: [ Attribute action ]
-  , componentKey :: Maybe Key
-  } deriving Functor
-
--- | Smart constructor for @ComponentOptions@
-componentOptions :: ComponentOptions action
-componentOptions
-  = ComponentOptions
-  { onMounted = Nothing
-  , onUnmounted = Nothing
-  , attributes = []
-  , componentKey = Nothing
-  }
-
+-----------------------------------------------------------------------------
 -- | Existential wrapper used to allow the nesting of @Component@ in @App@
 data SomeComponent
-   = forall name model action . Eq model
-   => SomeComponent (Component name model action)
-
+   = forall model action . Eq model
+  => SomeComponent (Component model action)
+-----------------------------------------------------------------------------
 -- | Used with @component@ to parameterize @App@ by @name@
-data Component (name :: Symbol) model action
+data Component model action
   = Component
-  { componentName :: MisoString
+  { componentKey :: Maybe Key
+  , componentName :: MisoString
   , componentApp :: App model action
   }
-
+-----------------------------------------------------------------------------
 -- | Smart constructor for parameterizing @App@ by @name@
 -- Needed when calling @embed@ and @embedWith@
 component
-  :: forall name model action
-  . KnownSymbol name
-  => App model action
-  -> Component name model action
-component = Component (MS.ms (symbolVal (Proxy @name)))
-
+  :: MisoString  
+  -> App model action
+  -> Component model action
+component = Component Nothing
+-----------------------------------------------------------------------------
 -- | Used in the @view@ function to @embed@ @Component@s in @App@
-embed :: Eq model => Component name model a -> View action
-embed comp = Embed (SomeComponent comp) componentOptions
-
--- | Like @embed@ but with @ComponentOptions@ for mounting / unmounting, @Attribute@, etc.
-embedWith
+embed
   :: Eq model
-  => Component name model a
-  -> ComponentOptions action
-  -> View action
-embedWith comp opts = Embed (SomeComponent comp) opts
-
+  => Component model action
+  -> [Attribute b]
+  -> View b
+embed comp attrs = Embed attrs (SomeComponent comp)
+-----------------------------------------------------------------------------
+-- | Used in the @view@ function to @embed@ @Component@s in @App@, with @Key@
+embedKeyed
+  :: Eq model
+  => Component model action
+  -> Key
+  -> [Attribute b]
+  -> View b
+embedKeyed comp key attrs
+  = Embed attrs
+  $ SomeComponent comp { componentKey = Just key }
+-----------------------------------------------------------------------------
 -- | For constructing type-safe links
 instance HasLink (View a) where
-  type MkLink (View a) b = MkLink (Get '[] ()) b
-  toLink toA Proxy = toLink toA (Proxy :: Proxy (Get '[] ()))
-
+  type MkLink (View a) b = b
+  toLink x _ = x
+-----------------------------------------------------------------------------
 -- | Convenience class for using View
-class ToView v where toView :: v -> View action
-
+class ToView a where
+  type ToViewAction a :: Type
+  toView :: a -> View (ToViewAction a)
+-----------------------------------------------------------------------------
+instance ToView (View action) where
+  type ToViewAction (View action) = action
+  toView = id
+-----------------------------------------------------------------------------
+instance ToView (Component model action) where
+  type ToViewAction (Component model action) = action
+  toView (Component _ _ app) = toView app
+-----------------------------------------------------------------------------
+instance ToView (App model action) where
+  type ToViewAction (App model action) = action
+  toView App {..} = toView (view model)
+-----------------------------------------------------------------------------
 -- | Namespace of DOM elements.
 data NS
   = HTML -- ^ HTML Namespace
   | SVG  -- ^ SVG Namespace
   | MATHML  -- ^ MATHML Namespace
   deriving (Show, Eq)
-
+-----------------------------------------------------------------------------
 instance ToJSVal NS where
   toJSVal SVG  = toJSVal ("svg" :: JSString)
   toJSVal HTML = toJSVal ("html" :: JSString)
   toJSVal MATHML = toJSVal ("mathml" :: JSString)
-
+-----------------------------------------------------------------------------
 -- | A unique key for a dom node.
 --
 -- This key is only used to speed up diffing the children of a DOM
@@ -309,123 +218,57 @@ instance ToJSVal NS where
 -- of a given DOM node must be unique. Failure to satisfy this
 -- invariant gives undefined behavior at runtime.
 newtype Key = Key MisoString
-
-instance ToJSVal Key where toJSVal (Key x) = toJSVal x
-
--- | Convert custom key types to `Key`.
+-----------------------------------------------------------------------------
+-- | ToJSVal instance for Key
+instance ToJSVal Key where
+  toJSVal (Key x) = toJSVal x
+-----------------------------------------------------------------------------
+-- | Convert custom key types to @Key@.
 --
 -- Instances of this class do not have to guarantee uniqueness of the
--- generated keys, it is up to the user to do so. `toKey` must be an
+-- generated keys, it is up to the user to do so. @toKey@ must be an
 -- injective function.
-class ToKey key where toKey :: key -> Key
+class ToKey key where
+  -- | Converts any key into @Key@
+  toKey :: key -> Key
+-----------------------------------------------------------------------------
 -- | Identity instance
 instance ToKey Key where toKey = id
--- | Convert `MisoString` to `Key`
+-----------------------------------------------------------------------------
+-- | Convert @MisoString@ to @Key@
 instance ToKey JSString where toKey = Key . toMisoString
--- | Convert `T.Text` to `Key`
+-----------------------------------------------------------------------------
+-- | Convert @T.Text@ to @Key@
 instance ToKey T.Text where toKey = Key . toMisoString
--- | Convert `String` to `Key`
+-----------------------------------------------------------------------------
+-- | Convert @String@ to @Key@
 instance ToKey String where toKey = Key . toMisoString
--- | Convert `Int` to `Key`
+-----------------------------------------------------------------------------
+-- | Convert @Int@ to @Key@
 instance ToKey Int where toKey = Key . toMisoString
--- | Convert `Double` to `Key`
+-----------------------------------------------------------------------------
+-- | Convert @Double@ to @Key@
 instance ToKey Double where toKey = Key . toMisoString
--- | Convert `Float` to `Key`
+-----------------------------------------------------------------------------
+-- | Convert @Float@ to @Key@
 instance ToKey Float where toKey = Key . toMisoString
--- | Convert `Word` to `Key`
+-----------------------------------------------------------------------------
+-- | Convert @Word@ to @Key@
 instance ToKey Word where toKey = Key . toMisoString
-
--- | Attribute of a vnode in a `View`.
+-----------------------------------------------------------------------------
+-- | Attribute of a vnode in a @View@.
 --
--- The 'Sink' callback can be used to dispatch actions which are fed back to
+-- The @Sink@ callback can be used to dispatch actions which are fed back to
 -- the @update@ function. This is especially useful for event handlers
 -- like the @onclick@ attribute. The second argument represents the
 -- vnode the attribute is attached to.
 data Attribute action
-  = P MisoString Value
-  | E (Sink action -> Object -> JSM ())
-  | S (M.Map MisoString MisoString)
+  = Property MisoString Value
+  | Event (Sink action -> Object -> LogLevel -> Events -> JSM ())
+  | Styles (M.Map MisoString MisoString)
   deriving Functor
-
--- | `IsString` instance
+-----------------------------------------------------------------------------
+-- | @IsString@ instance
 instance IsString (View a) where
   fromString = Text . fromString
-
--- | Converting @Component@ to Lucid's @L.Html@
-instance Eq model => L.ToHtml (Component name model action) where
-  toHtmlRaw = L.toHtml
-  toHtml (Component _ App {..}) = L.toHtml (view model)
-
--- | Converting `View` to Lucid's `L.Html`
-instance L.ToHtml (View action) where
-  toHtmlRaw = L.toHtml
-  toHtml (Embed (SomeComponent (Component mount App{..})) ComponentOptions{..}) =
-    case L.toHtml (view model) of
-      html -> L.div_ (L.data_ "component-id" (fromMisoString mount) : makeAttrs attributes) html
-  toHtml (Node _ vType _ attrs vChildren) = L.with ele (makeAttrs attrs)
-    where
-      noEnd = ["img", "input", "br", "hr", "meta"]
-      tag = toTag $ fromMisoString vType
-      ele = if tag `elem` noEnd
-          then L.makeElementNoEnd tag
-          else L.makeElement tag kids
-      toTag = T.toLower
-      kids = foldMap L.toHtml $ collapseSiblingTextNodes vChildren
-
-  toHtml (Text x) | MS.null x = L.toHtml (" " :: T.Text)
-                  | otherwise = L.toHtml (fromMisoString x :: T.Text)
-  toHtml (TextRaw x)
-    | MS.null x = L.toHtml (" " :: T.Text)
-    | otherwise = L.toHtmlRaw (fromMisoString x :: T.Text)
-
-makeAttrs :: [Attribute action] -> [L.Attribute]
-makeAttrs attrs = lattrs
-  where
-      classes = T.intercalate " " [ v | P "class" (A.String v) <- attrs ]
-      propClass = M.fromList $ attrs >>= \case
-          P k v -> [(k, v)]
-          E _ -> []
-          S m -> [("style", A.String . fromMisoString $ M.foldrWithKey go mempty m)]
-            where
-              go :: MisoString -> MisoString -> MisoString -> MisoString
-              go k v ys = mconcat [ k, ":", v, ";" ] <> ys
-      xs = if not (T.null classes)
-          then M.insert "class" (A.String classes) propClass
-          else propClass
-      lattrs = [ L.makeAttribute k' (if k `elem` exceptions && v == A.Bool True then k' else v')
-               | (k,v) <- M.toList xs
-               , let k' = fromMisoString k
-               , let v' = toHtmlFromJSON v
-               , not (k `elem` exceptions && v == A.Bool False)
-               ]
-      exceptions = [ "checked"
-                   , "disabled"
-                   , "selected"
-                   , "hidden"
-                   , "readOnly"
-                   , "autoplay"
-                   , "required"
-                   , "default"
-                   , "autofocus"
-                   , "multiple"
-                   , "noValidate"
-                   , "autocomplete"
-                   ]
-
-collapseSiblingTextNodes :: [View a] -> [View a]
-collapseSiblingTextNodes [] = []
-collapseSiblingTextNodes (Text x : Text y : xs) =
-  collapseSiblingTextNodes (Text (x <> y) : xs)
--- TextRaw is the only child, so no need to collapse.
-collapseSiblingTextNodes (x:xs) =
-  x : collapseSiblingTextNodes xs
-
--- | Helper for turning JSON into Text
--- Object, Array and Null are kind of non-sensical here
-toHtmlFromJSON :: Value -> T.Text
-toHtmlFromJSON (A.String t) = t
-toHtmlFromJSON (A.Number t) = T.pack (show t)
-toHtmlFromJSON (A.Bool b) = if b then "true" else "false"
-toHtmlFromJSON A.Null = "null"
-toHtmlFromJSON (A.Object o) = T.pack (show o)
-toHtmlFromJSON (A.Array a) = T.pack (show a)
+-----------------------------------------------------------------------------
