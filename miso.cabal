@@ -160,7 +160,7 @@ library
     Miso.FFI.History
     Miso.FFI.SSE
     Miso.FFI.Storage
-    Miso.FFI.WebSocket
+    -- Miso.FFI.WebSocket
     Miso.FFI.Internal
     Miso.Html
     Miso.Html.Element
@@ -178,7 +178,7 @@ library
     Miso.Subscription.History
     Miso.Subscription.Keyboard
     Miso.Subscription.Mouse
-    Miso.Subscription.WebSocket
+    -- Miso.Subscription.WebSocket
     Miso.Subscription.Window
     Miso.Subscription.SSE
     Miso.Svg.Attribute
@@ -186,12 +186,16 @@ library
     Miso.Svg.Event
     Miso.Types
     Miso.Util
-    Miso.WebSocket
+    -- Miso.WebSocket
   exposed-modules:
     Miso
     Miso.Lens
     Miso.Svg
     Miso.String
+    Miso.WebSocket
+    Miso.FFI.WebSocket
+    Miso.Subscription.WebSocket
+    Miso.PrintableClass
   ghc-options:
     -Wall
   hs-source-dirs:

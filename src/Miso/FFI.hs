@@ -27,6 +27,9 @@ module Miso.FFI
   , syncCallback
   , syncCallback1
   , asyncCallback
+  , forkJSM
+  , JSM
+  , jsonStringify
   ) where
 -----------------------------------------------------------------------------
 import           Miso.FFI.Internal

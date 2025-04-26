@@ -56,10 +56,12 @@ import           Miso.String hiding (reverse)
 import           Miso.Types hiding (componentName)
 import           Miso.Event (Events)
 import           Miso.Effect (Sink, Effect, runEffect)
+import Debug.Trace
+import Miso.PrintableClass
 -----------------------------------------------------------------------------
 -- | Helper function to abstract out initialization of @App@ between top-level API functions.
 initialize
-  :: Eq model
+  :: (Printable action, Eq model)
   => App model action
   -> (Sink action -> JSM (MisoString, JSVal, IORef VTree))
   -- ^ Callback function is used to perform the creation of VTree
@@ -69,6 +71,7 @@ initialize App {..} getView = do
   componentActions <- liftIO (newIORef S.empty)
   let
     componentSink = \action -> liftIO $ do
+      traceM ("brungo-1: componentSinking action=" <> printItem action)
       atomicModifyIORef' componentActions $ \actions -> (actions S.|> action, ())
       serve
   componentSubThreads <- forM subs $ \sub -> FFI.forkJSM (sub componentSink)
@@ -76,7 +79,9 @@ initialize App {..} getView = do
   componentModel <- liftIO (newIORef model)
   let
     eventLoop !oldModel = liftIO wait >> do
+      traceM $ "event-loop-alive"
       as <- liftIO $ atomicModifyIORef' componentActions $ \actions -> (S.empty, actions)
+      traceM $ "brungo-1: internal - picking up these actions=" <> show (printItem <$> toList as)
       newModel <- foldEffects update componentSink (toList as) oldModel
       oldName <- liftIO $ oldModel `seq` makeStableName oldModel
       newName <- liftIO $ newModel `seq` makeStableName newModel
@@ -165,6 +170,7 @@ foldEffects _ _ [] m = pure m
 foldEffects update snk (e:es) o =
   case runEffect o (update e) of
     (n, subs) -> do
+      traceM $ "brungo: subs count from outer model " <> show (Prelude.length subs)
       forM_ subs $ \sub ->
         sub snk `catch` (void . exception)
       foldEffects update snk es n
@@ -193,7 +199,7 @@ sink name _ = \a ->
 -- Initial draw helper
 -- If prerendering, bypass diff and continue copying
 drawComponent
-  :: Prerender
+  :: Printable action => Prerender
   -> MisoString
   -> App model action
   -> Sink action
@@ -241,7 +247,7 @@ unmount mountCallback app@App {..} cs@ComponentState {..} = do
 -- infrastructure for each sub-component. During this
 -- process we go between the Haskell heap and the JS heap.
 runView
-  :: Prerender
+  :: Printable action => Prerender
   -> View action
   -> Sink action
   -> LogLevel

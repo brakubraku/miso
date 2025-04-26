@@ -53,6 +53,7 @@ import           Servant.API (HasLink(MkLink, toLink))
 import           Miso.Effect (Effect, Sub, Sink)
 import           Miso.Event.Types
 import           Miso.String (MisoString, toMisoString)
+import Miso.PrintableClass
 -----------------------------------------------------------------------------
 -- | Application entry point
 data App model action = App
@@ -139,7 +140,7 @@ data View action
 -----------------------------------------------------------------------------
 -- | Existential wrapper used to allow the nesting of @Component@ in @App@
 data SomeComponent
-   = forall model action . Eq model
+   = forall model action . (Eq model, Printable action)
   => SomeComponent (Component model action)
 -----------------------------------------------------------------------------
 -- | Used with @component@ to parameterize @App@ by @name@
@@ -160,7 +161,7 @@ component = Component Nothing
 -----------------------------------------------------------------------------
 -- | Used in the @view@ function to @embed@ @Component@s in @App@
 embed
-  :: Eq model
+  :: (Eq model, Printable action)
   => Component model action
   -> [Attribute b]
   -> View b
@@ -168,7 +169,7 @@ embed comp attrs = Embed attrs (SomeComponent comp)
 -----------------------------------------------------------------------------
 -- | Used in the @view@ function to @embed@ @Component@s in @App@, with @Key@
 embedKeyed
-  :: Eq model
+  :: (Eq model, Printable action)
   => Component model action
   -> Key
   -> [Attribute b]
