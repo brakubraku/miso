@@ -70,7 +70,6 @@ initialize App {..} getView = do
   componentActions <- liftIO (newIORef S.empty)
   let
     componentSink = \action -> liftIO $ do
-      traceM ("brungo-1: componentSinking action=" <> printItem action)
       atomicModifyIORef' componentActions $ \actions -> (actions S.|> action, ())
       serve
   componentSubThreads <- forM subs $ \sub -> FFI.forkJSM (sub componentSink)
@@ -78,9 +77,7 @@ initialize App {..} getView = do
   componentModel <- liftIO (newIORef model)
   let
     eventLoop !oldModel = liftIO wait >> do
-      traceM $ "event-loop-alive"
       as <- liftIO $ atomicModifyIORef' componentActions $ \actions -> (S.empty, actions)
-      traceM $ "brungo-1: internal - picking up these actions=" <> show (printItem <$> toList as)
       newModel <- foldEffects update componentSink (toList as) oldModel
       oldName <- liftIO $ oldModel `seq` makeStableName oldModel
       newName <- liftIO $ newModel `seq` makeStableName newModel
