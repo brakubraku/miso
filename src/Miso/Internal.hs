@@ -57,11 +57,10 @@ import           Miso.Types hiding (componentName)
 import           Miso.Event (Events)
 import           Miso.Effect (Sink, Effect, runEffect)
 import Debug.Trace
-import Miso.PrintableClass
 -----------------------------------------------------------------------------
 -- | Helper function to abstract out initialization of @App@ between top-level API functions.
 initialize
-  :: (Printable action, Eq model)
+  :: Eq model
   => App model action
   -> (Sink action -> JSM (MisoString, JSVal, IORef VTree))
   -- ^ Callback function is used to perform the creation of VTree
@@ -199,7 +198,7 @@ sink name _ = \a ->
 -- Initial draw helper
 -- If prerendering, bypass diff and continue copying
 drawComponent
-  :: Printable action => Prerender
+  :: Prerender
   -> MisoString
   -> App model action
   -> Sink action
@@ -247,7 +246,7 @@ unmount mountCallback app@App {..} cs@ComponentState {..} = do
 -- infrastructure for each sub-component. During this
 -- process we go between the Haskell heap and the JS heap.
 runView
-  :: Printable action => Prerender
+  :: Prerender
   -> View action
   -> Sink action
   -> LogLevel

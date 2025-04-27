@@ -195,7 +195,6 @@ library
     Miso.WebSocket
     Miso.FFI.WebSocket
     Miso.Subscription.WebSocket
-    Miso.PrintableClass
   ghc-options:
     -Wall
   hs-source-dirs:

@@ -77,13 +77,12 @@ import           Miso.Storage
 import           Miso.Subscription
 import           Miso.Types
 import           Miso.Util
-import Miso.PrintableClass
 -----------------------------------------------------------------------------
 -- | Runs an isomorphic miso application.
 -- Assumes the pre-rendered DOM is already present.
 -- Note: Uses @mountPoint@ as the @Component@ name.
 -- Always mounts to /<body>/. Copies page into the virtual DOM.
-miso :: (Eq model, Printable action) => (URI -> App model action) -> JSM ()
+miso :: Eq model => (URI -> App model action) -> JSM ()
 miso f = withJS $ do
   app@App {..} <- f <$> getURI
   initialize app $ \snk -> do
@@ -98,7 +97,7 @@ miso f = withJS $ do
 -----------------------------------------------------------------------------
 -- | Runs a miso application
 -- Initializes application at @mountPoint@ (defaults to /<body>/ when @Nothing@)
-startApp :: (Eq model, Printable action) => App model action -> JSM ()
+startApp :: Eq model => App model action -> JSM ()
 startApp app@App {..} = withJS $
   initialize app $ \snk -> do
     renderStyles styles

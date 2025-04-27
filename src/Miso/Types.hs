@@ -140,7 +140,7 @@ data View action
 -----------------------------------------------------------------------------
 -- | Existential wrapper used to allow the nesting of @Component@ in @App@
 data SomeComponent
-   = forall model action . (Eq model, Printable action)
+   = forall model action . Eq model
   => SomeComponent (Component model action)
 -----------------------------------------------------------------------------
 -- | Used with @component@ to parameterize @App@ by @name@
@@ -161,7 +161,7 @@ component = Component Nothing
 -----------------------------------------------------------------------------
 -- | Used in the @view@ function to @embed@ @Component@s in @App@
 embed
-  :: (Eq model, Printable action)
+  :: Eq model
   => Component model action
   -> [Attribute b]
   -> View b
@@ -169,7 +169,7 @@ embed comp attrs = Embed attrs (SomeComponent comp)
 -----------------------------------------------------------------------------
 -- | Used in the @view@ function to @embed@ @Component@s in @App@, with @Key@
 embedKeyed
-  :: (Eq model, Printable action)
+  :: Eq model
   => Component model action
   -> Key
   -> [Attribute b]
