@@ -53,7 +53,6 @@ import           Servant.API (HasLink(MkLink, toLink))
 import           Miso.Effect (Effect, Sub, Sink)
 import           Miso.Event.Types
 import           Miso.String (MisoString, toMisoString)
-import Miso.PrintableClass
 -----------------------------------------------------------------------------
 -- | Application entry point
 data App model action = App
