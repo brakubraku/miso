@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -6,7 +5,6 @@
 
 module Main where
 
-import Control.Monad.State (modify, get)
 import Data.Bool
 import Data.Function
 import qualified Data.Map as M

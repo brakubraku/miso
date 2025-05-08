@@ -1,13 +1,13 @@
 -----------------------------------------------------------------------------
-{-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE ScopedTypeVariables       #-}
-{-# LANGUAGE OverloadedStrings         #-}
-{-# LANGUAGE FlexibleInstances         #-}
-{-# LANGUAGE TypeApplications          #-}
-{-# LANGUAGE RecordWildCards           #-}
-{-# LANGUAGE DeriveFunctor             #-}
-{-# LANGUAGE TypeFamilies              #-}
-{-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ExistentialQuantification  #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE DataKinds                  #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso.Types
@@ -34,6 +34,7 @@ module Miso.Types
   -- ** Functions
   , defaultApp
   , component
+  , component_
   , embed
   , embedKeyed
   , getMountPoint
@@ -60,12 +61,12 @@ data App model action = App
   -- ^ initial model
   , update :: action -> Effect model action
   -- ^ Function to update model, optionally providing effects.
-  --   See the @Transition@ monad for succinctly expressing model transitions.
+  --   See the 'Transition' monad for succinctly expressing model transitions.
   , view :: model -> View action
   -- ^ Function to draw `View`
   , subs :: [ Sub action ]
   -- ^ List of subscriptions to run during application lifetime
-  , events :: M.Map MisoString Bool
+  , events :: M.Map MisoString Capture
   -- ^ List of delegated events that the body element will listen for.
   --   You can start with 'Miso.Event.Types.defaultEvents' and modify as needed.
   , styles :: [CSS]
@@ -73,7 +74,9 @@ data App model action = App
   -- These styles are appended dynamically to the <head> section of your HTML page
   -- before the initial draw on <body> occurs.
   , initialAction :: Maybe action
-  -- ^ Initial action that is run after the application has loaded, optional since *1.9*
+  -- ^ Initial action that is run after the application has loaded, optional
+  --
+  -- @since 1.9.0.0
   , mountPoint :: Maybe MisoString
   -- ^ Id of the root element for DOM diff.
   -- If 'Nothing' is provided, the entire document body is used as a mount point.
@@ -142,7 +145,8 @@ data SomeComponent
    = forall model action . Eq model
   => SomeComponent (Component model action)
 -----------------------------------------------------------------------------
--- | Used with @component@ to parameterize @App@ by @name@
+-- | A 'Component' wraps an 'App' and can be communicated with via 'componentName'
+-- when using 'notify'. Its state is accessible via 'sample'.
 data Component model action
   = Component
   { componentKey :: Maybe Key
@@ -150,13 +154,22 @@ data Component model action
   , componentApp :: App model action
   }
 -----------------------------------------------------------------------------
--- | Smart constructor for parameterizing @App@ by @name@
+-- | Smart constructor for 'Component' construction.
 -- Needed when calling @embed@ and @embedWith@
 component
-  :: MisoString  
+  :: MisoString
   -> App model action
   -> Component model action
 component = Component Nothing
+-----------------------------------------------------------------------------
+-- | Smart constructor for 'Component' construction.
+-- This is a nameless component, which means that it is isolated and
+-- cannot be communicated with by other components via 'notify' or 'sample'.
+--
+component_
+  :: App model action
+  -> Component model action
+component_ = Component Nothing ""
 -----------------------------------------------------------------------------
 -- | Used in the @view@ function to @embed@ @Component@s in @App@
 embed
@@ -170,10 +183,10 @@ embed comp attrs = Embed attrs (SomeComponent comp)
 embedKeyed
   :: Eq model
   => Component model action
-  -> Key
   -> [Attribute b]
+  -> Key
   -> View b
-embedKeyed comp key attrs
+embedKeyed comp attrs key
   = Embed attrs
   $ SomeComponent comp { componentKey = Just key }
 -----------------------------------------------------------------------------
@@ -218,6 +231,7 @@ instance ToJSVal NS where
 -- of a given DOM node must be unique. Failure to satisfy this
 -- invariant gives undefined behavior at runtime.
 newtype Key = Key MisoString
+  deriving (Show, Eq, IsString)
 -----------------------------------------------------------------------------
 -- | ToJSVal instance for Key
 instance ToJSVal Key where

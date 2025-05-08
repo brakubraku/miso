@@ -1,8 +1,7 @@
 -----------------------------------------------------------------------------
-{-# LANGUAGE CPP             #-}
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE RecordWildCards   #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Main
@@ -21,7 +20,7 @@ import           Language.Javascript.JSaddle ((!), (!!), (#), JSVal, (<#))
 import qualified Language.Javascript.JSaddle as J
 import           Prelude hiding ((!!), null, unlines)
 ----------------------------------------------------------------------------
-import           Miso (App(styles), View,Effect, defaultApp, run, CSS(..), scheduleIO, startApp, io, (=:))
+import           Miso (App(styles), View,Effect, defaultApp, run, CSS(..), startApp, io, io_, (=:))
 import qualified Miso as M
 import           Miso.Lens ((.=), Lens, lens)
 import           Miso.String (MisoString, unlines, null)
@@ -83,7 +82,7 @@ app = defaultApp (Model mempty) updateModel viewModel
 ----------------------------------------------------------------------------
 -- | Update function
 updateModel :: Action -> Effect Model Action
-updateModel ReadFile = scheduleIO $ do
+updateModel ReadFile = io_ $ do
   fileReaderInput <- M.getElementById "fileReader"
   file <- fileReaderInput ! ("files" :: String) !! 0
   reader <- J.new (J.jsg ("FileReader" :: String)) ([] :: [JSVal])
@@ -92,13 +91,13 @@ updateModel ReadFile = scheduleIO $ do
     M.asyncCallback $ do
       result <- J.fromJSValUnchecked =<< reader ! ("result" :: String)
       liftIO (putMVar mvar result)
-  void $ reader # ("readAsText" :: String) $ [file] 
+  void $ reader # ("readAsText" :: String) $ [file]
   SetContent <$> liftIO (readMVar mvar)
 updateModel (SetContent c) = info .= c
 updateModel ClickInput = io $ do
   fileReader <- M.getElementById "fileReader"
   void $ fileReader # ("click" :: String) $ ([] :: [JSVal])
-----------------------------------------------------------------------------  
+----------------------------------------------------------------------------
 -- | View function
 viewModel :: Model -> View Action
 viewModel Model{..} =

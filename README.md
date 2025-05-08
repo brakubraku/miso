@@ -50,6 +50,7 @@
 - [Internals](#internals)
 - [Examples](#examples)
 - [Building examples](#building-examples)
+- [HTTP](#interacting-with-http-apis)
 - [Coverage](#coverage)
 - [Isomorphic](#isomorphic)
 - [Benchmarks](#benchmarks)
@@ -264,6 +265,13 @@ $ nix shell 'gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org'
 > [!NOTE]
 > This will put `wasm32-wasi-cabal` in your `$PATH`, along with `wasm32-wasi-ghc`. Since the WASM backend is relatively new, the ecosystem is not entirely patched to support it. Therefore, we will need to use patched packages from time to time.
 
+> [!TIP]
+> Instead of using a `nix shell`, it's possible to install the GHC WASM Flake into your environment so it will always be present on `$PATH`
+
+```bash
+$ nix profile install 'gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org'
+```
+
 Update your `cabal.project` to the following
 
 - `cabal.project`
@@ -288,21 +296,17 @@ if arch(wasm32)
   -- ghc-wasm-meta, this is superseded by the global cabal.config.
   shared: True
 
-  -- https://github.com/haskellari/time-compat/issues/37
-  -- Older versions of time don't build on WASM.
-  constraints: time installed
-  allow-newer: time
-
   -- https://github.com/haskellari/splitmix/pull/73
   source-repository-package
     type: git
     location: https://github.com/amesgen/splitmix
-    tag: 5f5b766d97dc735ac228215d240a3bb90bc2ff75
+    tag: cea9e31bdd849eb0c17611bb99e33d590e126164
 ```
 
 Call `wasm32-wasi-cabal build --allow-newer` and a `WASM` payload should be created in `dist-newstyle/` directory.
 
 ```bash
+$ wasm32-wasi-cabal update
 $ wasm32-wasi-cabal build --allow-newer
 ```
 
@@ -425,11 +429,18 @@ Using [GHCup](https://www.haskell.org/ghcup/) you should be able to acquire the 
 > Use [cachix](https://cachix.org) to ensure you're not building dependencies unnecessarily `cachix use haskell-miso-cachix`
 
 ```bash
-❯ nix-shell -p pkgs.pkgsCross.ghcjs.haskell.packages.ghc9122.ghc -I nixpkgs=https://github.com/alexfmpe/nixpkgs/archive/b594b289740a2bc917ed9c66fef5d905f389cb96.tar.gz
+❯ nix-shell -p pkgs.pkgsCross.ghcjs.haskell.packages.ghc9122.ghc -I nixpkgs=https://github.com/NixOS/nixpkgs/archive/65f179f903e8bbeff3215cd613bdc570940c0eab.tar.gz
 ```
 
 > [!NOTE]
 > This will put `javascript-unknown-ghcjs-ghc` in your `$PATH`, along with `javascript-unknown-ghcjs-ghc-pkg`. You might also need to specify in your `cabal.project` file that you are using the JS backend.
+
+> [!TIP]
+> Alternatively, if you'd like to install the compiler into your global environment (so you don't need to develop inside a `bash` shell) you can use the following command.
+>
+> ```bash
+> ❯ nix-env -iA pkgs.pkgsCross.ghcjs.haskell.packages.ghc9122.ghc -f https://github.com/NixOS/nixpkgs/archive/65f179f903e8bbeff3215cd613bdc570940c0eab.tar.gz
+> ```
 
 - `cabal.project`
 
@@ -576,6 +587,23 @@ cd result/bin/todo-mvc.jsexe && http-sever
 Serving HTTP on 0.0.0.0 port 8000 ...
 ```
 
+## Interacting with HTTP APIs 🔌
+
+If you want to interact with an HTTP API, we recommend one of the following approaches:
+
+  1. For a simple JSON-based API, you can use Miso's `fetchJSON` function.
+
+  2. In more complex cases, you can define a [Servant](https://www.servant.dev/) API and automatically obtain client functions via `servant-client-js` (or any other `servant-client-core`-based backend).
+
+     The Fetch example ([Source](https://github.com/dmjio/miso/blob/master/examples/fetch/Main.hs), [Demo](https://fetch.haskell-miso.org/)) demonstrates the necessary ingredients. Make sure to add the following to your `cabal.project`:
+
+     ```cabal
+     source-repository-package
+       type: git
+       location: https://github.com/amesgen/servant-client-js
+       tag: 2853fb4f26175f51ae7b9aaf0ec683c45070d06e
+     ```
+
 ## Coverage ✅
 
 The core engine of `miso` is the [diff](https://github.com/dmjio/miso/blob/master/ts/dom.ts) function. It is responsible for all DOM manipulation that occurs in a miso application and has [100% code coverage](http://coverage.haskell-miso.org). Tests and coverage made possible using [bun](https://github.com/oven-sh/bun).
@@ -682,6 +710,7 @@ Become a [financial contributor](https://opencollective.com/miso/contribute) and
   - [@MaxGabriel](https://github.com/MaxGabriel)
   - [@DigitalOcean](https://github.com/DigitalOcean)
   - [@maybetonyfu](https://github.com/maybetonyfu)
+  - [@jhrcek](https://github.com/jhrcek)
   - etc.
 
 <a href="https://opencollective.com/miso"><img src="https://opencollective.com/miso/individuals.svg?width=890"></a>

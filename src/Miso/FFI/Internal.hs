@@ -56,6 +56,7 @@ module Miso.FFI.Internal
    , addStyleSheet
    , fetchJSON
    , shouldSync
+   , setComponent
    ) where
 -----------------------------------------------------------------------------
 import           Control.Concurrent (ThreadId, forkIO)
@@ -379,12 +380,20 @@ reload = void $ jsg "location" # "reload" $ ([] :: [MisoString])
 setBodyComponent :: MisoString -> JSM ()
 setBodyComponent name = do
   component <- toJSVal name
+  node <- jsg "document" ! "body"
   moduleMiso <- jsg "miso"
-  void $ moduleMiso # "setBodyComponent" $ [component]
+  void $ moduleMiso # "setComponent" $ [node, component]
+-----------------------------------------------------------------------------
+-- | Sets @data-component-id@ on the node given by second argument to a value given by the first argument
+setComponent :: MisoString -> JSVal -> JSM ()
+setComponent name node = do
+  component <- toJSVal name
+  moduleMiso <- jsg "miso"
+  void $ moduleMiso # "setComponent" $ [node, component]
 -----------------------------------------------------------------------------
 -- | Appends a 'style_' element containing CSS to 'head_'
 --
--- > addCssStyle "body { background-color: green; }"
+-- > addStyle "body { background-color: green; }"
 --
 -- > <head><style>body { background-color: green; }</style></head>
 --
@@ -396,8 +405,6 @@ addStyle css = do
 -----------------------------------------------------------------------------
 -- | Appends a StyleSheet 'link_' element to 'head_'
 -- The 'link_' tag will contain a URL to a CSS file.
---
--- *<link href="https://domain.com/style.css" rel="stylesheet" />*
 --
 -- > addStyleSheet "https://cdn.jsdelivr.net/npm/todomvc-common@1.0.5/base.min.css"
 --

@@ -148,7 +148,7 @@ executable file-reader
 
 executable fetch
   import:
-    common-options, js-only
+    common-options
   default-language:
     Haskell2010
   main-is:
@@ -166,7 +166,8 @@ executable fetch
     jsaddle,
     miso,
     mtl,
-    servant
+    servant,
+    servant-client-js
 
 executable canvas2d
   import:

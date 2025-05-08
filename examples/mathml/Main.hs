@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 module Main where
 
 import Miso
@@ -22,8 +21,7 @@ updateModel _ = pure ()
 -- | Constructs a virtual DOM from a model
 viewModel :: Model -> View ()
 viewModel _ =
-    nodeMathml
-        "math"
+    math_
         []
         [ nodeMathml
             "msup"

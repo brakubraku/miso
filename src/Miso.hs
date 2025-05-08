@@ -1,7 +1,8 @@
 -----------------------------------------------------------------------------
-{-# LANGUAGE CPP             #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE CPP                       #-}
+{-# LANGUAGE RecordWildCards           #-}
+{-# LANGUAGE TemplateHaskell           #-}
+{-# OPTIONS_GHC -Wno-duplicate-exports #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso
@@ -12,16 +13,30 @@
 -- Portability :  non-portable
 ----------------------------------------------------------------------------
 module Miso
-  ( -- * Miso
-    -- ** Combinators
+  ( -- * API
+    -- ** Entry
     miso
+  , (🍜)
   , startApp
     -- ** Sink
-  , sink
+  , withSink
+  , Sink
     -- ** Sampling
   , sample
     -- ** Message Passing
   , notify
+    -- ** Subscription
+  , start
+  , start_
+  , stop
+  , Sub
+  , SubName
+  -- ** Effect
+  , issue
+  , batch
+  , io
+  , io_
+  , for
   , module Miso.Types
     -- * Effect
   , module Miso.Effect
@@ -38,7 +53,7 @@ module Miso
   , module Miso.Run
     -- * Exception
   , module Miso.Exception
-    -- * Subs
+    -- * Subscriptions
   , module Miso.Subscription
     -- * Storage
   , module Miso.Storage
@@ -48,10 +63,19 @@ module Miso
   , module Miso.Util
     -- * FFI
   , module Miso.FFI
+    -- * State management
+  , ask
+  , modify
+  , modify'
+  , get
+  , gets
+  , put
+  , tell
   ) where
 -----------------------------------------------------------------------------
 import           Control.Monad (void)
 import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.RWS (get, gets, modify, modify', tell, put, ask)
 import           Data.IORef (newIORef)
 import           Language.Javascript.JSaddle (Object(Object), JSM)
 #ifndef GHCJS_BOTH
@@ -77,11 +101,11 @@ import           Miso.Storage
 import           Miso.Subscription
 import           Miso.Types
 import           Miso.Util
------------------------------------------------------------------------------
+----------------------------------------------------------------------------
 -- | Runs an isomorphic miso application.
 -- Assumes the pre-rendered DOM is already present.
--- Note: Uses @mountPoint@ as the @Component@ name.
--- Always mounts to /<body>/. Copies page into the virtual DOM.
+-- Note: Uses 'mountPoint' as the 'Component' name.
+-- Always mounts to \<body\>. Copies page into the virtual DOM.
 miso :: Eq model => (URI -> App model action) -> JSM ()
 miso f = withJS $ do
   app@App {..} <- f <$> getURI
@@ -95,8 +119,12 @@ miso f = withJS $ do
     viewRef <- liftIO $ newIORef $ VTree (Object vtree)
     pure (name, mount, viewRef)
 -----------------------------------------------------------------------------
+-- | Alias for 'miso'.
+(🍜) :: Eq model => (URI -> App model action) -> JSM ()
+(🍜) = miso
+----------------------------------------------------------------------------
 -- | Runs a miso application
--- Initializes application at @mountPoint@ (defaults to /<body>/ when @Nothing@)
+-- Initializes application at 'mountPoint' (defaults to \<body\> when @Nothing@)
 startApp :: Eq model => App model action -> JSM ()
 startApp app@App {..} = withJS $
   initialize app $ \snk -> do
@@ -105,7 +133,7 @@ startApp app@App {..} = withJS $
     let name = getMountPoint mountPoint
     FFI.setBodyComponent name
     mount <- mountElement name
-    diff mount Nothing (Just vtree)
+    diff Nothing (Just vtree) mount
     viewRef <- liftIO (newIORef vtree)
     pure (name, mount, viewRef)
 -----------------------------------------------------------------------------
