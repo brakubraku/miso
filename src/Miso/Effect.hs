@@ -32,6 +32,7 @@ module Miso.Effect
   , issue
   , withSink
   , mapSub
+  , componentId
   -- * Internal
   , runEffect
   -- * Deprecated
@@ -49,7 +50,7 @@ import           Control.Monad.Fail (MonadFail, fail)
 import qualified Control.Monad.Fail as Fail
 #endif
 import           Data.Foldable (for_)
-import           Control.Monad.RWS ( RWS, put, tell, execRWS
+import           Control.Monad.RWS ( RWS, put, tell, execRWS, ask
                                    , MonadState, MonadReader, MonadWriter
                                    )
 -----------------------------------------------------------------------------
@@ -237,4 +238,8 @@ batchEff :: model -> [JSM action] -> Effect model action
 batchEff model actions = do
   put model
   batch actions
+-----------------------------------------------------------------------------
+-- | Retrieves the @name@ of the @App@
+componentId :: EffectCore action model MisoString
+componentId = ask
 -----------------------------------------------------------------------------

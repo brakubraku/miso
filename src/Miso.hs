@@ -23,8 +23,10 @@ module Miso
   , Sink
     -- ** Sampling
   , sample
+  , sample_
     -- ** Message Passing
   , notify
+  , notify_
     -- ** Subscription
   , start
   , start_
@@ -37,11 +39,14 @@ module Miso
   , io
   , io_
   , for
+  , componentId
   , module Miso.Types
     -- * Effect
   , module Miso.Effect
     -- * Event
   , module Miso.Event
+    -- * Property
+  , module Miso.Property
     -- * Html
   , module Miso.Html
   , module Miso.Render
@@ -94,6 +99,7 @@ import qualified Miso.FFI.Internal as FFI
 import           Miso.Html
 import           Miso.Internal
 import           Miso.Mathml
+import           Miso.Property
 import           Miso.Render
 import           Miso.Router
 import           Miso.Run
@@ -106,7 +112,7 @@ import           Miso.Util
 -- Assumes the pre-rendered DOM is already present.
 -- Note: Uses 'mountPoint' as the 'Component' name.
 -- Always mounts to \<body\>. Copies page into the virtual DOM.
-miso :: Eq model => (URI -> App model action) -> JSM ()
+miso :: Eq model => (URI -> App name model action) -> JSM ()
 miso f = withJS $ do
   app@App {..} <- f <$> getURI
   initialize app $ \snk -> do
@@ -120,12 +126,12 @@ miso f = withJS $ do
     pure (name, mount, viewRef)
 -----------------------------------------------------------------------------
 -- | Alias for 'miso'.
-(🍜) :: Eq model => (URI -> App model action) -> JSM ()
+(🍜) :: Eq model => (URI -> App name model action) -> JSM ()
 (🍜) = miso
 ----------------------------------------------------------------------------
 -- | Runs a miso application
 -- Initializes application at 'mountPoint' (defaults to \<body\> when @Nothing@)
-startApp :: Eq model => App model action -> JSM ()
+startApp :: Eq model => App name model action -> JSM ()
 startApp app@App {..} = withJS $
   initialize app $ \snk -> do
     renderStyles styles

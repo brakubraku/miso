@@ -20,10 +20,11 @@ import           Language.Javascript.JSaddle ((!), (!!), (#), JSVal, (<#))
 import qualified Language.Javascript.JSaddle as J
 import           Prelude hiding ((!!), null, unlines)
 ----------------------------------------------------------------------------
-import           Miso (App(styles), View,Effect, defaultApp, run, CSS(..), startApp, io, io_, (=:))
+import           Miso (App(styles), View,Effect, defaultApp, run, CSS(..), startApp, io, io_)
 import qualified Miso as M
 import           Miso.Lens ((.=), Lens, lens)
 import           Miso.String (MisoString, unlines, null)
+import qualified Miso.Style as CSS
 ----------------------------------------------------------------------------
 -- | Model
 newtype Model
@@ -77,7 +78,7 @@ css = unlines
   ]
 ----------------------------------------------------------------------------
 -- | Miso application
-app :: App Model Action
+app :: App name Model Action
 app = defaultApp (Model mempty) updateModel viewModel
 ----------------------------------------------------------------------------
 -- | Update function
@@ -130,7 +131,7 @@ viewModel Model{..} =
               ]
               [ "Select File" ]
             , M.input_
-              [ M.style_ ("display" =: "none")
+              [ CSS.style_ [ CSS.display "none" ]
               , M.id_ "fileReader"
               , M.type_ "file"
               , M.class_ "button is-large"
