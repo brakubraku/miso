@@ -11,7 +11,7 @@
 -- Portability :  non-portable
 --
 -- This module defines `Effect`, `Sub` and `Sink` types, which are used to define
--- `Miso.Types.update` function and `Miso.Types.subs` field of the `Miso.Types.App`.
+-- `Miso.Types.update` function and `Miso.Types.subs` field of the `Miso.Types.Component`.
 --
 ----------------------------------------------------------------------------
 module Miso.Effect
@@ -26,13 +26,13 @@ module Miso.Effect
   , (<#)
   , (#>)
   , batch
+  , batch_
   , io
   , io_
   , for
   , issue
   , withSink
   , mapSub
-  , componentId
   -- * Internal
   , runEffect
   -- * Deprecated
@@ -50,7 +50,7 @@ import           Control.Monad.Fail (MonadFail, fail)
 import qualified Control.Monad.Fail as Fail
 #endif
 import           Data.Foldable (for_)
-import           Control.Monad.RWS ( RWS, put, tell, execRWS, ask
+import           Control.Monad.RWS ( RWS, put, tell, execRWS
                                    , MonadState, MonadReader, MonadWriter
                                    )
 -----------------------------------------------------------------------------
@@ -88,12 +88,19 @@ batch actions = sequence_
   | action <- actions
   ]
 -----------------------------------------------------------------------------
+-- | Like @batch@ but action are discarded
+batch_ :: [JSM ()] -> Effect model action
+batch_ actions = sequence_
+  [ tell [ const action ]
+  | action <- actions
+  ]
+-----------------------------------------------------------------------------
 -- | A monad for succinctly expressing model transitions in the @update@ function.
 --
 -- @Effect@ is a @RWS@, where the @State@ abstracts over manually passing the model
 -- around. It's also a @Writer@ @Monad@, where the accumulator is a list of scheduled
--- @IO@ actions. Multiple actions can be scheduled using @Control.Monad.Writer.Class.tell@ 
--- from the @mtl@ library and a single action can be scheduled using 'scheduleIO'.
+-- @IO@ actions. Multiple actions can be scheduled using 'Control.Monad.Writer.Class.tell'
+-- from the @mtl@ library and a single action can be scheduled using 'io_'.
 --
 -- An @Effect@ represents the results of an update action.
 --
@@ -108,14 +115,14 @@ batch actions = sequence_
 -- @LambdaCase@ language extension is enabled:
 --
 -- @
--- myApp = App
+-- myComponent = Component
 --   { update = \\case
 --       MyAction1 -> do
 --         field1 .= value1
 --         counter += 1
 --       MyAction2 -> do
 --         field2 %= f
---         scheduleIO $ do
+--         io_ $ do
 --           putStrLn \"Hello\"
 --           putStrLn \"World!\"
 --   , ...
@@ -142,7 +149,7 @@ newtype EffectCore model action a
 -- | @MonadFail@ instance for @EffectCore@
 instance MonadFail (EffectCore model action) where
   fail s = do
-    io $ consoleError (ms s)
+    io_ $ consoleError (ms s)
 #if __GLASGOW_HASKELL__ <= 881
     Fail.fail s
 #else
@@ -157,7 +164,7 @@ runEffect
     -> (model, [Sink action -> JSM ()])
 runEffect = execRWS . runEffectCore
 -----------------------------------------------------------------------------
--- | Turn a 'Sub' that consumes actions of type @a@ into a 'Sub' that consumes 
+-- | Turn a 'Sub' that consumes actions of type @a@ into a 'Sub' that consumes
 -- actions of type @b@ using the supplied function of type @a -> b@.
 mapSub :: (a -> b) -> Sub a -> Sub b
 mapSub f sub = \g -> sub (g . f)
@@ -165,17 +172,17 @@ mapSub f sub = \g -> sub (g . f)
 -- | Schedule a single 'IO' action for later execution.
 --
 -- Note that multiple 'IO' action can be scheduled using
--- @Control.Monad.Writer.Class.tell@ from the @mtl@ library.
-io_ :: JSM action -> Effect model action
-io_ action = withSink (action >>=)
+-- 'Control.Monad.Writer.Class.tell' from the @mtl@ library.
+io :: JSM action -> Effect model action
+io action = withSink (action >>=)
 -----------------------------------------------------------------------------
 -- | Like 'io_' but doesn't cause an action to be dispatched to
 -- the @update@ function.
 --
 -- This is handy for scheduling @IO@ computations where you don't care
 -- about their results or when they complete.
-io :: JSM () -> Effect model action
-io action = withSink (\_ -> action)
+io_ :: JSM () -> Effect model action
+io_ action = withSink (\_ -> action)
 -----------------------------------------------------------------------------
 -- | Like 'io' but generalized to any instance of 'Foldable'
 --
@@ -184,8 +191,9 @@ io action = withSink (\_ -> action)
 for :: Foldable f => JSM (f action) -> Effect model action
 for actions = withSink $ \sink -> actions >>= flip for_ sink
 -----------------------------------------------------------------------------
--- | @sink@ allows users to access the sink of the 'Component' or top-level
--- 'App' in their application. This is useful for introducing 'IO' into the system.
+-- | @withSink@ allows users to access the sink of the 'Component' or top-level
+-- 'Component' in their application. This is useful for introducing 'IO' into the system.
+-- A synonym for 'Control.Monad.Writer.tell', specialized to 'Effect'.
 --
 -- A use-case is scheduling an 'IO' computation which creates a 3rd-party JS
 -- widget which has an associated callback. The callback can then call the sink
@@ -197,25 +205,23 @@ for actions = withSink $ \sink -> actions >>= flip for_ sink
 withSink :: (Sink action -> JSM ()) -> Effect model action
 withSink f = tell [ f ]
 -----------------------------------------------------------------------------
--- | A synonym for @tell@, specialized to @Effect@
+-- | Issue a new 'Action' to be processed by 'update'.
 --
 -- > update :: Action -> Effect Model Action
 -- > update = \case
 -- >   Click -> issue HelloWorld
 --
 -- @since 1.9.0.0
---
--- Used to issue new @action@
 issue :: action -> Effect model action
 issue action = tell [ \f -> f action ]
 -----------------------------------------------------------------------------
-{-# DEPRECATED scheduleIO "Please use 'io_' instead" #-}
+{-# DEPRECATED scheduleIO "Please use 'io' instead" #-}
 scheduleIO :: JSM action -> Effect model action
-scheduleIO = io_
+scheduleIO = io
 -----------------------------------------------------------------------------
-{-# DEPRECATED scheduleIO_ "Please use 'io' instead" #-}
+{-# DEPRECATED scheduleIO_ "Please use 'io_' instead" #-}
 scheduleIO_ :: JSM () -> Effect model action
-scheduleIO_ = io
+scheduleIO_ = io_
 -----------------------------------------------------------------------------
 {-# DEPRECATED scheduleIOFor_ "Please use 'for' instead" #-}
 scheduleIOFor_ :: Foldable f => JSM (f action) -> Effect model action
@@ -238,8 +244,4 @@ batchEff :: model -> [JSM action] -> Effect model action
 batchEff model actions = do
   put model
   batch actions
------------------------------------------------------------------------------
--- | Retrieves the @name@ of the @App@
-componentId :: EffectCore action model MisoString
-componentId = ask
 -----------------------------------------------------------------------------

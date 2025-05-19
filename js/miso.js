@@ -65,14 +65,10 @@ function mkVNode() {
     tag: "div",
     key: null,
     events: {},
-    onDestroyed: () => {
-    },
-    onBeforeDestroyed: () => {
-    },
-    onCreated: () => {
-    },
-    onBeforeCreated: () => {
-    },
+    onDestroyed: () => {},
+    onBeforeDestroyed: () => {},
+    onCreated: () => {},
+    onBeforeCreated: () => {},
     shouldSync: false,
     type: "vnode"
   };
@@ -175,6 +171,7 @@ function populate(c, n) {
     if (n["type"] === "vnode") {
       diffChildren(c, n, n["domRef"]);
     }
+    drawCanvas(n);
   }
 }
 function diffProps(cProps, nProps, node, isSvg) {
@@ -261,9 +258,14 @@ function createElement(obj, cb) {
   populate(null, obj);
   callCreated(obj);
 }
+function drawCanvas(obj) {
+  if (obj["tag"] === "canvas" && "draw" in obj) {
+    obj["draw"](obj["domRef"]);
+  }
+}
 function unmountComponent(obj) {
   if ("onUnmounted" in obj)
-    obj["onUnmounted"]();
+    obj["onUnmounted"](obj["data-component-id"]);
   obj["unmount"]();
 }
 function mountComponent(obj) {
@@ -279,7 +281,7 @@ function mountComponent(obj) {
     obj["children"].push(component);
     obj["domRef"].appendChild(component["domRef"]);
     if (obj["onMounted"])
-      obj["onMounted"]();
+      obj["onMounted"](componentId);
   });
 }
 function create(obj, parent) {

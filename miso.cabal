@@ -168,8 +168,8 @@ library
     Miso.Html.Property
     Miso.Html.Types
     Miso.Internal
-    Miso.Mathml
     Miso.Mathml.Element
+    Miso.Mathml.Property
     Miso.Property
     Miso.Render
     Miso.Router
@@ -191,7 +191,9 @@ library
     -- Miso.WebSocket
   exposed-modules:
     Miso
+    Miso.Canvas
     Miso.Lens
+    Miso.Mathml
     Miso.Svg
     Miso.String
     Miso.WebSocket

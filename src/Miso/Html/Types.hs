@@ -42,9 +42,9 @@ import           Miso.Types
 rawHtml
   :: MisoString
   -> View action
-rawHtml = TextRaw
+rawHtml = VTextRaw
 -----------------------------------------------------------------------------
--- | Create a new @Miso.Html.Types.Node@.
+-- | Create a new @Miso.Html.Types.VNode@.
 --
 -- @node ns tag key attrs children@ creates a new node with tag @tag@
 -- and 'Key' @key@ in the namespace @ns@. All @attrs@ are called when
@@ -55,15 +55,15 @@ node :: NS
      -> [Attribute action]
      -> [View action]
      -> View action
-node = Node
+node = VNode
 -----------------------------------------------------------------------------
 -- | Create a new @Text@ with the given content.
 text :: MisoString -> View action
-text = Text
+text = VText
 -----------------------------------------------------------------------------
 -- | `TextRaw` creation. Don't use directly
 textRaw :: MisoString -> View action
-textRaw = TextRaw
+textRaw = VTextRaw
 -----------------------------------------------------------------------------
 -- | Virtual DOM implemented as a JavaScript `Object`.
 --   Used for diffing, patching and event delegation.

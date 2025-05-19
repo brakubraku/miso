@@ -20,9 +20,9 @@ type VComp = {
   'data-component-id': string;
   children: Array<VTree>;
   onBeforeMounted: () => void;
-  onMounted: () => void;
+  onMounted: (componentId: string) => void;
   onBeforeUnmounted: () => void;
-  onUnmounted: () => void;
+  onUnmounted: (componentId: string) => void;
   mount: (f: (component: VTree) => void) => void;
   unmount: (e: Element) => void;
 };
@@ -42,6 +42,7 @@ type VNode = {
   onBeforeDestroyed: () => void;
   onCreated: () => void;
   onBeforeCreated: () => void;
+  draw?: (DOMRef) => void;
 };
 
 type VText = {

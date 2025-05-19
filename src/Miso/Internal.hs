@@ -22,20 +22,18 @@ module Miso.Internal
     initialize
   , componentMap
   , notify
-  , notify_
+  , notify'
   , runView
   , sample
-  , sample_
+  , sample'
   , renderStyles
   , Prerender(..)
   -- * Subscription
-  , start
-  , start_
-  , stop
+  , startSub
+  , stopSub
   ) where
 -----------------------------------------------------------------------------
 import           Control.Exception (throwIO)
-import           Control.Concurrent (ThreadId, killThread)
 import           Control.Monad (forM, forM_, when, void)
 import           Control.Monad.Reader (ask)
 import           Control.Monad.IO.Class
@@ -47,8 +45,13 @@ import qualified Data.Map.Strict as M
 import qualified Data.Sequence as S
 import           Data.Sequence (Seq)
 import qualified JavaScript.Array as JSArray
+#ifndef GHCJS_BOTH
 import           Language.Javascript.JSaddle hiding (Sync)
+#else
+import           Language.Javascript.JSaddle
+#endif
 import           GHC.TypeLits (KnownSymbol, symbolVal)
+import           GHC.Conc (ThreadStatus(ThreadDied, ThreadFinished), ThreadId, killThread, threadStatus)
 import           Data.Proxy (Proxy(..))
 import           Prelude hiding (null)
 import           System.IO.Unsafe (unsafePerformIO)
@@ -65,16 +68,16 @@ import           Miso.Html hiding (on)
 import           Miso.String hiding (reverse)
 import           Miso.Types
 import           Miso.Event (Events)
-import           Miso.Effect (Sub, SubName, Sink, Effect, runEffect, io)
+import           Miso.Effect (Sub, SubName, Sink, Effect, runEffect, io_)
 -----------------------------------------------------------------------------
--- | Helper function to abstract out initialization of @App@ between top-level API functions.
+-- | Helper function to abstract out initialization of @Component@ between top-level API functions.
 initialize
   :: Eq model
-  => App name model action
+  => Component name model action
   -> (Sink action -> JSM (MisoString, JSVal, IORef VTree))
   -- ^ Callback function is used to perform the creation of VTree
   -> JSM (IORef VTree)
-initialize App {..} getView = do
+initialize Component {..} getView = do
   Waiter {..} <- liftIO waiter
   componentActions <- liftIO (newIORef S.empty)
   let
@@ -166,7 +169,7 @@ componentMap = unsafePerformIO (newIORef mempty)
 -- @Component@ being accessed is not available.
 sample
   :: forall name model action . KnownSymbol name
-  => App name model action
+  => Component name model action
   -> JSM model
 sample _ = do
   componentStateMap <- liftIO (readIORef componentMap)
@@ -176,24 +179,26 @@ sample _ = do
   where
     name = ms $ symbolVal (Proxy @name)
 -----------------------------------------------------------------------------
-sample_
+-- | Like @sample@ except used for dynamic @Component@ where the component-id
+-- has been retrieved via @ask@.
+sample'
   :: MisoString
   -> JSM model
-sample_ name = do
+sample' name = do
   componentStateMap <- liftIO (readIORef componentMap)
   liftIO (case M.lookup name componentStateMap of
     Nothing -> throwIO (NotMountedException name)
     Just ComponentState {..} -> readIORef componentModel)
 -----------------------------------------------------------------------------
 -- | Used for bidirectional communication between components.
--- Specify the mounted @App@ you'd like to target.
+-- Specify the mounted @Component@ you'd like to target.
 --
--- This function is used to send messages to @App@ that are mounted on
+-- This function is used to send messages to @Component@ that are mounted on
 -- other parts of the DOM tree.
 --
 notify
   :: forall name model action . KnownSymbol name
-  => App name model action
+  => Component name model action
   -> action
   -> JSM ()
 notify _ action = do
@@ -203,17 +208,14 @@ notify _ action = do
   where
     name = ms $ symbolVal (Proxy @name)
 -----------------------------------------------------------------------------
--- | Used for bidirectional communication between components.
+-- | Like @notify@ except used for dynamic @Component@ where the /component-id/
+-- has been retrieved via @ask@.
 --
--- Specify the mounted @App@ you'd like to target.
--- This function is used to send messages to @App@ on other parts of the
--- DOM tree.
---
-notify_
+notify'
   :: MisoString
   -> action
   -> JSM ()
-notify_ name action = do
+notify' name action = do
   componentStateMap <- liftIO (readIORef componentMap)
   forM_ (M.lookup name componentStateMap) $ \ComponentState {..} ->
     componentSink action
@@ -250,16 +252,16 @@ foldEffects update synchronicity name snk (e:es) o =
           sub snk `catch` (void . exception)
       foldEffects update synchronicity name snk es n
 --------------------------------------------------
--- | Internally used for runView and startApp
+-- | Internally used for runView and startComponent
 -- Initial draw helper
 -- If prerendering, bypass diff and continue copying
 drawComponent
   :: Prerender
   -> MisoString
-  -> App name model action
+  -> Component name model action
   -> Sink action
   -> JSM (MisoString, JSVal, IORef VTree)
-drawComponent prerender name App {..} snk = do
+drawComponent prerender name Component {..} snk = do
   vtree <- runView prerender (view model) snk logLevel events
   mountElement <- FFI.getComponent name
   when (prerender == DontPrerender) (diff Nothing (Just vtree) mountElement)
@@ -268,10 +270,10 @@ drawComponent prerender name App {..} snk = do
 -----------------------------------------------------------------------------
 -- | Drains the event queue before unmounting, executed synchronously
 drain
-  :: App name model action
+  :: Component name model action
   -> ComponentState model action
   -> JSM ()
-drain app@App{..} cs@ComponentState {..} = do
+drain app@Component{..} cs@ComponentState {..} = do
   actions <- liftIO $ atomicModifyIORef' componentActions $ \actions -> (S.empty, actions)
   if S.null actions then pure () else go actions
     where
@@ -284,10 +286,10 @@ drain app@App{..} cs@ComponentState {..} = do
 -- | Helper function for cleanly destroying a @Component@
 unmount
   :: Function
-  -> App name model action
+  -> Component name model action
   -> ComponentState model action
   -> JSM ()
-unmount mountCallback app@App {..} cs@ComponentState {..} = do
+unmount mountCallback app@Component {..} cs@ComponentState {..} = do
   undelegator componentMount componentVTree events (logLevel `elem` [DebugEvents, DebugAll])
   freeFunction mountCallback
   liftIO (mapM_ killThread =<< readIORef componentSubThreads)
@@ -308,7 +310,7 @@ runView
   -> LogLevel
   -> Events
   -> JSM VTree
-runView prerender (VComp name attributes key (Component app)) snk _ _ = do
+runView prerender (VComp name attributes key (SomeComponent app)) snk _ _ = do
   compName <-
     if null name
     then liftIO freshComponentId
@@ -331,7 +333,7 @@ runView prerender (VComp name attributes key (Component app)) snk _ _ = do
   flip (FFI.set "mount") vcomp =<< toJSVal mountCallback
   FFI.set "unmount" unmountCallback vcomp
   pure (VTree vcomp)
-runView prerender (Node ns tag key attrs kids) snk logLevel events = do
+runView prerender (VNode ns tag key attrs kids) snk logLevel events = do
   vnode <- createNode "vnode" ns key tag
   setAttrs vnode attrs snk logLevel events
   vchildren <- ghcjsPure . jsval =<< procreate
@@ -345,20 +347,20 @@ runView prerender (Node ns tag key attrs kids) snk logLevel events = do
           VTree (Object vtree) <- runView prerender kid snk logLevel events
           pure vtree
         ghcjsPure (JSArray.fromList kidsViews)
-runView _ (Text t) _ _ _ = do
+runView _ (VText t) _ _ _ = do
   vtree <- create
   FFI.set "type" ("vtext" :: JSString) vtree
   FFI.set "ns" ("text" :: JSString) vtree
   FFI.set "text" t vtree
   pure $ VTree vtree
-runView prerender (TextRaw str) snk logLevel events =
+runView prerender (VTextRaw str) snk logLevel events =
   case parseView str of
     [] ->
-      runView prerender (Text (" " :: MisoString)) snk logLevel events
+      runView prerender (VText (" " :: MisoString)) snk logLevel events
     [parent] ->
       runView prerender parent snk logLevel events
     kids -> do
-      runView prerender (Node HTML "div" Nothing mempty kids) snk logLevel events
+      runView prerender (VNode HTML "div" Nothing mempty kids) snk logLevel events
 -----------------------------------------------------------------------------
 -- | @createNode@
 -- A helper function for constructing a vtree (used for 'vcomp' and 'vnode')
@@ -409,7 +411,7 @@ parseView html = reverse (go (parseTree html) [])
   where
     go [] xs = xs
     go (TagLeaf (TagText s) : next) views =
-      go next (Text s : views)
+      go next (VText s : views)
     go (TagLeaf (TagOpen name attrs) : next) views =
       go (TagBranch name attrs [] : next) views
     go (TagBranch name attrs kids : next) views =
@@ -418,7 +420,7 @@ parseView html = reverse (go (parseTree html) [])
                  | (key, value) <- attrs
                  ]
         newNode =
-          Node HTML name Nothing attrs' (reverse (go kids []))
+          VNode HTML name Nothing attrs' (reverse (go kids []))
       in
         go next (newNode:views)
     go (TagLeaf _ : next) views =
@@ -437,61 +439,41 @@ renderStyles styles =
     Href url -> FFI.addStyleSheet url
     Style css -> FFI.addStyle css
 -----------------------------------------------------------------------------
--- | Starts an 'Sub' dynamically, runs for the lifetime of an 'App'.
---
--- 'Sub' that are unnamed have their names autogenerated and cannot be
--- stopped. This is useful for long-running actions that do not need to
--- be stopped, but need to start in response to a future event from
--- that occurs in the 'update' function.
---
--- Warning: If you call 'start_' multiple times it will fork a thread
--- for each 'Sub' and you will not be able to call 'stop' on it. See
--- 'start' if you'd like to be able to 'stop' your 'Sub'.
---
-start_ :: Sub action -> Effect action model
-start_ sub = do
-  compName <- ask
-  io $ do
-    M.lookup compName <$> liftIO (readIORef componentMap) >>= \case
-      Nothing -> pure ()
-      Just ComponentState {..} -> do
-        tid <- FFI.forkJSM (sub componentSink)
-        subName <- liftIO freshSubId
-        liftIO $ do
-          atomicModifyIORef' componentSubThreads $ \m ->
-            (M.insert subName tid m, ())
------------------------------------------------------------------------------
 -- | Starts a named 'Sub' dynamically, during the life of a 'Component'.
--- This 'Sub' can be stopped by calling @stop subName@ from the 'update' function.
--- All 'Sub' started will be stopped if a component is unmounted.
+-- The 'Sub' can be stopped by calling @stop subName@ from the 'update' function.
+-- All 'Sub' started will be stopped if a 'Component' is unmounted.
 --
--- If the 'Sub' is already running then this call will no-op.
---
-start :: SubName -> Sub action -> Effect action model
-start subName sub = do
+startSub :: SubName -> Sub action -> Effect action model
+startSub subName sub = do
   compName <- ask
-  io $ do
-    M.lookup compName <$> liftIO (readIORef componentMap) >>= \case
+  io_
+    (M.lookup compName <$> liftIO (readIORef componentMap) >>= \case
       Nothing -> pure ()
-      Just ComponentState {..} -> do
+      Just compState@ComponentState {..} -> do
         mtid <- liftIO (M.lookup subName <$> readIORef componentSubThreads)
         case mtid of
-          Nothing -> do
-            tid <- FFI.forkJSM (sub componentSink)
-            liftIO $ atomicModifyIORef' componentSubThreads $ \m ->
-              (M.insert subName tid m, ())
-          Just _ -> pure ()
+          Nothing ->
+            startThread compState
+          Just tid -> do
+            status <- liftIO (threadStatus tid)
+            case status of
+              ThreadFinished -> startThread compState
+              ThreadDied -> startThread compState
+              _ -> pure ())
+  where
+    startThread ComponentState {..} = do
+      tid <- FFI.forkJSM (sub componentSink)
+      liftIO $ atomicModifyIORef' componentSubThreads $ \m ->
+        (M.insert subName tid m, ())
 -----------------------------------------------------------------------------
--- | Stops a 'Sub' at the given 'SubName' from executing, during the life of a 'Component'.
--- All 'Sub' started will be stopped automatically if a component is unmounted.
+-- | Stops a named 'Sub' dynamically, during the life of a 'Component'.
+-- All 'Sub' started will be stopped automatically if a 'Component' is unmounted.
 --
--- If the 'Sub' is not running then this call will no-op
---
-stop :: SubName -> Effect action model
-stop subName = do
+stopSub :: SubName -> Effect action model
+stopSub subName = do
   compName <- ask
-  io $ do
-    M.lookup compName <$> liftIO (readIORef componentMap) >>= \case
+  io_
+    (M.lookup compName <$> liftIO (readIORef componentMap) >>= \case
       Nothing -> do
         pure ()
       Just ComponentState {..} -> do
@@ -499,5 +481,5 @@ stop subName = do
         forM_ mtid $ \tid -> do
           liftIO $ do
             atomicModifyIORef' componentSubThreads $ \m -> (M.delete subName m, ())
-            killThread tid
+            killThread tid)
 -----------------------------------------------------------------------------

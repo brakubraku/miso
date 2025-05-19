@@ -19,7 +19,7 @@ import Network.Wai.EventSource
 import Network.Wai.Handler.Warp
 import Network.Wai.Middleware.Gzip
 import Network.Wai.Middleware.RequestLogger
-import Servant hiding (respond)
+import Servant
 import qualified System.IO as IO
 
 import Miso hiding (SSE, run)
@@ -62,7 +62,7 @@ sendEvents chan =
         threadDelay (10 ^ (6 :: Int))
 
 -- | Page for setting HTML doctype and header
-newtype Page = Page (App "app" Model Action)
+newtype Page = Page (Component "app" Model Action)
 
 instance ToHtml Page where
     toHtml (Page x) =

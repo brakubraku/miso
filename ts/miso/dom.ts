@@ -64,7 +64,7 @@ function diffNodes(c: VTree, n: VTree, parent: Element): void {
     c['tag'] === n['tag'] &&
     n['key'] === c['key'] &&
     n['type'] === c['type'] &&
-   componentIdCheck(n,c)
+    componentIdCheck(n,c)
   ) {
     n['domRef'] = c['domRef'];
     // dmj: we will diff properties on 'vcomp' as well
@@ -119,6 +119,7 @@ export function populate(c: VTree, n: VTree): void {
     if (n['type'] === 'vnode') {
       diffChildren(c as VNode, n as VNode, n['domRef']);
     }
+    drawCanvas(n);
   }
 }
 
@@ -221,9 +222,16 @@ function createElement(obj: VTree, cb: (e: Node) => void): void {
   callCreated(obj);
 }
 
+/* draw the canvas if you need to */
+function drawCanvas (obj: VTree) {
+  if (obj['tag'] === 'canvas' && 'draw' in obj) {
+    obj['draw'](obj['domRef']);
+  }
+}
+
 // unmount components
 function unmountComponent(obj: VTree): void {
-  if ('onUnmounted' in obj) obj['onUnmounted']();
+  if ('onUnmounted' in obj) obj['onUnmounted'](obj['data-component-id']);
   obj['unmount']();
 }
 
@@ -248,7 +256,7 @@ function mountComponent(obj: VTree): void {
     // to tie the knot (attach to both vdom and real dom).
     obj['children'].push(component);
     obj['domRef'].appendChild(component['domRef']);
-    if (obj['onMounted']) obj['onMounted']();
+    if (obj['onMounted']) obj['onMounted'](componentId);
   });
 }
 // creates nodes on virtual and dom (vtext, vcomp, vnode)

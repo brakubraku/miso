@@ -199,6 +199,21 @@ module Miso.Style
   , zIndex
   -- *** Colors
   , module Miso.Style.Color
+  -- *** Units
+  , px
+  , ppx
+  , pct
+  , pt
+  , vw
+  , vh
+  , deg
+  , turn
+  , rad
+  , rpx
+  , rem
+  , em
+  , s
+  , ms
   ) where
 -----------------------------------------------------------------------------
 import           Data.Map (Map)
@@ -210,9 +225,51 @@ import           Miso.Property
 import           Miso.Types (Attribute)
 import qualified Miso.Types as MT
 -----------------------------------------------------------------------------
-import           Prelude hiding (filter)
+import           Prelude hiding (filter, rem)
 -----------------------------------------------------------------------------
--- | Smart constructor for Attributes. This function is helpful when 
+pt :: Double -> MisoString
+pt x = ms x <> "pt"
+-----------------------------------------------------------------------------
+px :: Double -> MisoString
+px x = ms x <> "px"
+-----------------------------------------------------------------------------
+deg :: Double -> MisoString
+deg x = ms x <> "deg"
+-----------------------------------------------------------------------------
+turn :: Double -> MisoString
+turn x = ms x <> "turn"
+-----------------------------------------------------------------------------
+rad :: Double -> MisoString
+rad x = ms x <> "rad"
+-----------------------------------------------------------------------------
+rpx :: Double -> MisoString
+rpx x = ms x <> "rpx"
+-----------------------------------------------------------------------------
+rem :: Double -> MisoString
+rem x = ms x <> "rem"
+-----------------------------------------------------------------------------
+em :: Double -> MisoString
+em x = ms x <> "em"
+-----------------------------------------------------------------------------
+vh :: Double -> MisoString
+vh x = ms x <> "vh"
+-----------------------------------------------------------------------------
+vw :: Double -> MisoString
+vw x = ms x <> "vw"
+-----------------------------------------------------------------------------
+s :: Double -> MisoString
+s x = ms x <> "s"
+-----------------------------------------------------------------------------
+ms :: Double -> MisoString
+ms x = ms x <> "ms"
+-----------------------------------------------------------------------------
+pct :: Double -> MisoString
+pct x = ms x <> "%"
+-----------------------------------------------------------------------------
+ppx :: Double -> MisoString
+ppx x = ms x <> "ppx"
+-----------------------------------------------------------------------------
+-- | Smart constructor for Attributes. This function is helpful when
 -- constructing 'Style'.
 --
 -- Example shown below.
@@ -224,22 +281,33 @@ import           Prelude hiding (filter)
 (=:) :: k -> v -> (k, v)
 k =: v = (k,v)
 -----------------------------------------------------------------------------
------------------------------------------------------------------------------
--- | 'Style'
---
--- Type for a CSS 'Style'
+-- | Type for a CSS 'Style'
 --
 type Style = (MisoString, MisoString)
 -----------------------------------------------------------------------------
--- | 'Styles'
---
--- Type for a @Map@ of CSS 'Style'. Used with @StyleSheet@.
---
+-- | Type for a @Map@ of CSS 'Style'. Used with @StyleSheet@.
+-- It maps CSS properties to their values.
 type Styles = Map MisoString MisoString
 -----------------------------------------------------------------------------
--- | 'StyleSheet'
+-- | Type for a CSS style on native.
+-- Internally it maps From CSS selectors to 'Styles'.
 --
--- Type for a CSS style on native
+-- @
+-- testSheet :: StyleSheet
+-- testSheet =
+--   sheet_
+--   [ ".name" =:
+--       style_
+--       [ backgroundColor "red"
+--       , alignContent "top"
+--       ]
+--   , "#container" =:
+--       style_
+--       [ backgroundColor "blue"
+--       , alignContent "center"
+--       ]
+--   ]
+-- @
 --
 newtype StyleSheet = StyleSheet { getStyleSheet :: Map MisoString Styles }
 -----------------------------------------------------------------------------
@@ -267,34 +335,14 @@ style_ = MT.Styles . M.fromList
 styleInline_ ::  MisoString -> Attribute action
 styleInline_ = textProp "style"
 -----------------------------------------------------------------------------
--- | 'renderStyleSheet'
---
--- Renders a 'StyleSheet' to a 'MisoString'
---
--- @
--- testSheet :: StyleSheet
--- testSheet =
---   sheet_
---   [ ".name" =:
---       style_
---       [ backgroundColor "red"
---       , alignContent "top"
---       ]
---   , "#container" =:
---       style_
---       [ backgroundColor "blue"
---       , alignContent "center"
---       ]
---   ]
--- @
---
+-- | Renders a 'Styles' to a 'MisoString'
 renderStyles :: Styles -> MisoString
 renderStyles m = MS.unlines
-  [ mconcat [ spaced, k, ":", v, ";" ]
-  | (k,v) <- M.toList m
-  , let spaced = "  "
+  [ mconcat [ indent, k, ":", v, ";" ]
+  | let indent = "  "
+  , (k,v) <- M.toList m
   ]
------------------------------------------------------------------------------  
+-----------------------------------------------------------------------------
 renderStyleSheet :: StyleSheet -> MisoString
 renderStyleSheet styleSheet = mconcat
   [ MS.unlines

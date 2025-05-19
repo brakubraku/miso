@@ -139,7 +139,7 @@ import Miso
 import Miso.String
 import Miso.Lens
 ----------------------------------------------------------------------------
--- | Application model state
+-- | Component model state
 newtype Model = Model
   { _counter :: Int
   } deriving (Show, Eq)
@@ -147,7 +147,7 @@ newtype Model = Model
 counter :: Lens Model Int
 counter = lens _counter $ \record field -> record { _counter = field }
 ----------------------------------------------------------------------------
--- | Sum type for App events
+-- | Sum type for Component events
 data Action
   = AddOne
   | SubtractOne
@@ -156,16 +156,16 @@ data Action
 ----------------------------------------------------------------------------
 -- | Entry point for a miso application
 main :: IO ()
-main = run (startApp app)
+main = run (startComponent component)
 ----------------------------------------------------------------------------
 -- | WASM export, required when compiling w/ the WASM backend.
 #ifdef WASM
 foreign export javascript "hs_start" main :: IO ()
 #endif
 ----------------------------------------------------------------------------
--- | `defaultApp` takes as arguments the initial model, update function, view function
-app :: App name Model Action
-app = defaultApp emptyModel updateModel viewModel
+-- | `defaultComponent` takes as arguments the initial model, update function, view function
+component :: Component name Model Action
+component = defaultComponent emptyModel updateModel viewModel
 ----------------------------------------------------------------------------
 -- | Empty application state
 emptyModel :: Model
@@ -176,7 +176,7 @@ updateModel :: Action -> Effect Model Action
 updateModel = \case
   AddOne        -> counter += 1
   SubtractOne   -> counter -= 1
-  SayHelloWorld -> io $ do
+  SayHelloWorld -> io_ $ do
     consoleLog "Hello World"
     alert "Hello World"
 ----------------------------------------------------------------------------
@@ -544,6 +544,7 @@ For real-world examples of Haskell `miso` applications, see below.
 | **WebSocket**   | A simple WebSocket example             | [Source](https://github.com/dmjio/miso/blob/master/examples/websocket/Main.hs)   | [Demo](https://websocket.haskell-miso.org/)   | [@dmjio](https://github.com/dmjio)   |
 | **Router**      | A client-side routing example          | [Source](https://github.com/dmjio/miso/blob/master/examples/router/Main.hs)      | [Demo](https://router.haskell-miso.org/)      | [@dmjio](https://github.com/dmjio)   |
 | **Canvas 2D**   | A 2D Canvas rendering example          | [Source](https://github.com/dmjio/miso/blob/master/examples/canvas2d/Main.hs)    | [Demo](https://canvas.haskell-miso.org/)      | [@dmjio](https://github.com/dmjio)   |
+| **Space Invaders**   | A Space-Invaders-like game       | [Source](https://gitlab.com/juliendehos/miso-invaders)    | [Demo](https://juliendehos.gitlab.io/miso-invaders/)      | [@juliendehos](https://github.com/juliendehos)   |
 
 ## Building examples
 

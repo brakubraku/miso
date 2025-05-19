@@ -28,6 +28,9 @@ module Miso.FFI
   , forkJSM
   , JSM
   , jsonStringify
+  -- ** Image
+  , Image (..)
+  , newImage
   ) where
 -----------------------------------------------------------------------------
 import           Miso.FFI.Internal
