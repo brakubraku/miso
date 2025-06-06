@@ -30,6 +30,7 @@ module Miso.Internal
   , Prerender(..)
   -- * Subscription
   , startSub
+  , startSubForComponent
   , stopSub
   ) where
 -----------------------------------------------------------------------------
@@ -446,7 +447,10 @@ renderStyles styles =
 startSub :: SubName -> Sub action -> Effect model action
 startSub subName sub = do
   compName <- ask
-  io_
+  io_ $ startSubForComponent compName subName sub
+
+startSubForComponent :: MisoString -> SubName -> Sub action -> JSM ()
+startSubForComponent compName subName sub = do
     (M.lookup compName <$> liftIO (readIORef componentMap) >>= \case
       Nothing -> pure ()
       Just compState@ComponentState {..} -> do

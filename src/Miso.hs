@@ -29,6 +29,7 @@ module Miso
   , notify'
     -- ** Subscription
   , startSub
+  , startSubForComponent
   , stopSub
   , Sub
   , SubName
