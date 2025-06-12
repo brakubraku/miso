@@ -27,7 +27,7 @@ module Miso.Internal
   , sample
   , sample'
   , renderStyles
-  , Prerender(..)
+  , Hydrate(..)
   -- * Subscription
   , startSub
   , stopSub
@@ -37,7 +37,6 @@ import           Control.Exception (throwIO)
 import           Control.Monad (forM, forM_, when, void)
 import           Control.Monad.Reader (ask)
 import           Control.Monad.IO.Class
-import qualified Data.Aeson as A
 import           Data.Foldable (toList)
 import           Data.IORef (IORef, newIORef, atomicModifyIORef', readIORef, atomicWriteIORef, modifyIORef')
 import           Data.Map.Strict (Map)
@@ -68,6 +67,7 @@ import           Miso.Html hiding (on)
 import           Miso.String hiding (reverse)
 import           Miso.Types
 import           Miso.Event (Events)
+import           Miso.Property (textProp)
 import           Miso.Effect (Sub, SubName, Sink, Effect, runEffect, io_)
 -----------------------------------------------------------------------------
 -- | Helper function to abstract out initialization of @Component@ between top-level API functions.
@@ -99,7 +99,7 @@ initialize Component {..} getView = do
       oldName <- liftIO $ oldModel `seq` makeStableName oldModel
       newName <- liftIO $ newModel `seq` makeStableName newModel
       when (oldName /= newName && oldModel /= newModel) $ do
-        newVTree <- runView DontPrerender (view newModel) componentSink logLevel events
+        newVTree <- runView Draw (view newModel) componentSink logLevel events
         oldVTree <- liftIO (readIORef componentVTree)
         void waitForAnimationFrame
         diff (Just oldVTree) (Just newVTree) componentMount
@@ -114,11 +114,11 @@ initialize Component {..} getView = do
   forM_ initialAction componentSink
   pure componentVTree
 -----------------------------------------------------------------------------
--- | Prerender avoids calling @diff@
--- and instead calls @hydrate@
-data Prerender
-  = DontPrerender
-  | Prerender
+-- | 'Hydrate' avoids calling @diff@, and instead calls @hydrate@
+-- 'Draw' invokes 'diff'
+data Hydrate
+  = Draw
+  | Hydrate
   deriving (Show, Eq)
 -----------------------------------------------------------------------------
 -- | @Component@ state, data associated with the lifetime of a @Component@
@@ -179,12 +179,16 @@ sample _ = do
   where
     name = ms $ symbolVal (Proxy @name)
 -----------------------------------------------------------------------------
--- | Like @sample@ except used for dynamic @Component@ where the component-id
--- has been retrieved via @ask@.
+-- | Like @sample@ except used for @Component Dynamic model action@ where the component-id has been retrieved via @ask@ and generated using @onMountedWith@.
+--
+-- We use the @Component Dynamic model action@ argument to ensure the 'model'
+-- sampled unifies with what @sample'@ returns.
+--
 sample'
   :: MisoString
+  -> Component Dynamic model action
   -> JSM model
-sample' name = do
+sample' name _ = do
   componentStateMap <- liftIO (readIORef componentMap)
   liftIO (case M.lookup name componentStateMap of
     Nothing -> throwIO (NotMountedException name)
@@ -201,24 +205,38 @@ notify
   => Component name model action
   -> action
   -> JSM ()
-notify _ action = do
+notify Component {..} action = do
   componentStateMap <- liftIO (readIORef componentMap)
-  forM_ (M.lookup name componentStateMap) $ \ComponentState {..} ->
-    componentSink action
+  case M.lookup name componentStateMap of
+    Nothing -> do
+      when (logLevel `elem` [DebugNotify, DebugAll]) $ do
+        FFI.consoleWarn $
+          "[DEBUG_NOTIFY] Could not find component named: " <> name
+    Just ComponentState {..} ->
+      componentSink action
   where
     name = ms $ symbolVal (Proxy @name)
 -----------------------------------------------------------------------------
 -- | Like @notify@ except used for dynamic @Component@ where the /component-id/
--- has been retrieved via @ask@.
+-- has been retrieved via @ask@ and generated from @onMountedWith@.
+--
+-- We use the @Component Dynamic model action@ argument to ensure the 'action'
+-- being used unified with what the component expects.
 --
 notify'
   :: MisoString
+  -> Component Dynamic model action
   -> action
   -> JSM ()
-notify' name action = do
+notify' name Component {..} action = do
   componentStateMap <- liftIO (readIORef componentMap)
-  forM_ (M.lookup name componentStateMap) $ \ComponentState {..} ->
-    componentSink action
+  case M.lookup name componentStateMap of
+    Nothing ->
+      when (logLevel `elem` [DebugNotify, DebugAll]) $ do
+        FFI.consoleWarn $
+          "[DEBUG_NOTIFY'] Could not find component named: " <> name
+    Just ComponentState {..} ->
+      componentSink action
 -----------------------------------------------------------------------------
 -- | Sychronicity
 --
@@ -254,17 +272,17 @@ foldEffects update synchronicity name snk (e:es) o =
 --------------------------------------------------
 -- | Internally used for runView and startComponent
 -- Initial draw helper
--- If prerendering, bypass diff and continue copying
+-- If hydrateing, bypass diff and continue copying
 drawComponent
-  :: Prerender
+  :: Hydrate
   -> MisoString
   -> Component name model action
   -> Sink action
   -> JSM (MisoString, JSVal, IORef VTree)
-drawComponent prerender name Component {..} snk = do
-  vtree <- runView prerender (view model) snk logLevel events
+drawComponent hydrate name Component {..} snk = do
+  vtree <- runView hydrate (view model) snk logLevel events
   mountElement <- FFI.getComponent name
-  when (prerender == DontPrerender) (diff Nothing (Just vtree) mountElement)
+  when (hydrate == Draw) (diff Nothing (Just vtree) mountElement)
   ref <- liftIO (newIORef vtree)
   pure (name, mountElement, ref)
 -----------------------------------------------------------------------------
@@ -304,20 +322,20 @@ unmount mountCallback app@Component {..} cs@ComponentState {..} = do
 -- infrastructure for each sub-component. During this
 -- process we go between the Haskell heap and the JS heap.
 runView
-  :: Prerender
+  :: Hydrate
   -> View action
   -> Sink action
   -> LogLevel
   -> Events
   -> JSM VTree
-runView prerender (VComp name attributes key (SomeComponent app)) snk _ _ = do
+runView hydrate (VComp name attrs (SomeComponent app)) snk _ _ = do
   compName <-
     if null name
     then liftIO freshComponentId
     else pure name
   mountCallback <- do
     FFI.syncCallback1 $ \continuation -> do
-      vtreeRef <- initialize app (drawComponent prerender compName app)
+      vtreeRef <- initialize app (drawComponent hydrate compName app)
       VTree vtree <- liftIO (readIORef vtreeRef)
       void $ call continuation global [vtree]
   unmountCallback <- toJSVal =<< do
@@ -326,15 +344,15 @@ runView prerender (VComp name attributes key (SomeComponent app)) snk _ _ = do
         Nothing -> pure ()
         Just componentState ->
           unmount mountCallback app componentState
-  vcomp <- createNode "vcomp" HTML key "div"
-  setAttrs vcomp attributes snk (logLevel app) (events app)
+  vcomp <- createNode "vcomp" HTML "div"
+  setAttrs vcomp attrs snk (logLevel app) (events app)
   flip (FFI.set "children") vcomp =<< toJSVal ([] :: [MisoString])
   FFI.set "data-component-id" compName vcomp
   flip (FFI.set "mount") vcomp =<< toJSVal mountCallback
   FFI.set "unmount" unmountCallback vcomp
   pure (VTree vcomp)
-runView prerender (VNode ns tag key attrs kids) snk logLevel events = do
-  vnode <- createNode "vnode" ns key tag
+runView hydrate (VNode ns tag attrs kids) snk logLevel events = do
+  vnode <- createNode "vnode" ns tag
   setAttrs vnode attrs snk logLevel events
   vchildren <- ghcjsPure . jsval =<< procreate
   FFI.set "children" vchildren vnode
@@ -344,7 +362,7 @@ runView prerender (VNode ns tag key attrs kids) snk logLevel events = do
     where
       procreate = do
         kidsViews <- forM kids $ \kid -> do
-          VTree (Object vtree) <- runView prerender kid snk logLevel events
+          VTree (Object vtree) <- runView hydrate kid snk logLevel events
           pure vtree
         ghcjsPure (JSArray.fromList kidsViews)
 runView _ (VText t) _ _ _ = do
@@ -353,20 +371,20 @@ runView _ (VText t) _ _ _ = do
   FFI.set "ns" ("text" :: JSString) vtree
   FFI.set "text" t vtree
   pure $ VTree vtree
-runView prerender (VTextRaw str) snk logLevel events =
+runView hydrate (VTextRaw str) snk logLevel events =
   case parseView str of
     [] ->
-      runView prerender (VText (" " :: MisoString)) snk logLevel events
+      runView hydrate (VText (" " :: MisoString)) snk logLevel events
     [parent] ->
-      runView prerender parent snk logLevel events
+      runView hydrate parent snk logLevel events
     kids -> do
-      runView prerender (VNode HTML "div" Nothing mempty kids) snk logLevel events
+      runView hydrate (VNode HTML "div" mempty kids) snk logLevel events
 -----------------------------------------------------------------------------
 -- | @createNode@
 -- A helper function for constructing a vtree (used for 'vcomp' and 'vnode')
 -- Doesn't handle children
-createNode :: MisoString -> NS -> Maybe Key -> MisoString -> JSM Object
-createNode typ ns key tag = do
+createNode :: MisoString -> NS -> MisoString -> JSM Object
+createNode typ ns tag = do
   vnode <- create
   cssObj <- create
   propsObj <- create
@@ -377,7 +395,6 @@ createNode typ ns key tag = do
   FFI.set "events" eventsObj vnode
   FFI.set "ns" ns vnode
   FFI.set "tag" tag vnode
-  FFI.set "key" key vnode
   pure vnode
 -----------------------------------------------------------------------------
 -- | Helper function for populating "props" and "css" fields on a virtual
@@ -391,6 +408,9 @@ setAttrs
   -> JSM ()
 setAttrs vnode attrs snk logLevel events =
   forM_ attrs $ \case
+    Property "key" v -> do
+      value <- toJSVal v
+      FFI.set "key" value vnode
     Property k v -> do
       value <- toJSVal v
       o <- getProp "props" vnode
@@ -416,11 +436,11 @@ parseView html = reverse (go (parseTree html) [])
       go (TagBranch name attrs [] : next) views
     go (TagBranch name attrs kids : next) views =
       let
-        attrs' = [ Property key $ A.String (fromMisoString value)
+        attrs' = [ textProp key value
                  | (key, value) <- attrs
                  ]
         newNode =
-          VNode HTML name Nothing attrs' (reverse (go kids []))
+          VNode HTML name attrs' (reverse (go kids []))
       in
         go next (newNode:views)
     go (TagLeaf _ : next) views =
