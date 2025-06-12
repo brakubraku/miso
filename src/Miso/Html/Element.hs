@@ -89,7 +89,6 @@ module Miso.Html.Element
     , area_
     , audio_
     , img_
-    , imgKeyed_
     , map_
     , track_
     , video_
@@ -470,9 +469,6 @@ dd_ = nodeHtml "dd"
 -- | [\<img\>](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/img)
 img_ :: [Attribute action] -> View action
 img_ = flip (nodeHtml "img") []
-
-imgKeyed_ :: Key -> [Attribute action] -> View action
-imgKeyed_ k = flip (nodeHtmlKeyed "img" k) []
 
 -- | https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe
 -----------------------------------------------------------------------------
