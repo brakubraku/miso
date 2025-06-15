@@ -467,7 +467,7 @@ renderStyles styles =
 -- update Action =
 --   startSub LoggerSub $ \sink -> forever (threadDelay (secs 1) >> consoleLog "test")
 -- @
-startSub :: Ord subKey => subKey -> Sub action -> Effect model action
+startSub :: Text -> Sub action -> Effect model action
 startSub subKey sub = do
   compName <- ask
   io_
