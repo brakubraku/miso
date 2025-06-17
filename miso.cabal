@@ -44,7 +44,7 @@ common js-only-tests
     buildable: False
 
 common string-selector
-  if impl(ghcjs) || arch(javascript) || flag (jsstring-only) || arch(wasm32)
+  if impl(ghcjs) || arch(javascript) || flag (jsstring-only)
     hs-source-dirs:
       jsstring-src
   else
@@ -138,11 +138,12 @@ library
     Miso.Event.Decoder
     Miso.Event.Types
     Miso.Exception
-    Miso.FFI
+    -- Miso.FFI
     Miso.FFI.History
     Miso.FFI.SSE
     Miso.FFI.Storage
-    Miso.FFI.WebSocket
+    -- Miso.FFI.WebSocket
+    -- Miso.FFI.Internal
     Miso.Html
     Miso.Html.Element
     Miso.Html.Event
@@ -172,6 +173,9 @@ library
     Miso
     Miso.Svg
     Miso.String
+    Miso.FFI.WebSocket
+    Miso.FFI
+
   ghc-options:
     -Wall
   hs-source-dirs:

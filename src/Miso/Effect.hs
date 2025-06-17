@@ -15,7 +15,8 @@
 module Miso.Effect
   ( -- ** Effect
     -- *** Types
-    Effect
+    Effect(..)
+  , Effect
   , Sub
   , Sink
     -- *** Combinators
