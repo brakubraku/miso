@@ -42,13 +42,8 @@ common cpp
     cpp-options:
       -DPRODUCTION
 
-common js-only-tests
-  if !(impl(ghcjs) || arch(javascript)) || !flag(tests)
-    buildable: False
-
 common string-selector
-  if impl(ghcjs) || arch(javascript) || flag (jsstring-only) 
-  -- if impl(ghcjs) || arch(javascript) || flag (jsstring-only) || arch(wasm32)
+  if impl(ghcjs) || arch(javascript) || flag (jsstring-only) || arch(wasm32)
     hs-source-dirs:
       jsstring-src
   else
@@ -90,6 +85,14 @@ flag production
     Uses miso's production quality JS (miso.prod.js).
     This is built from calling "bun build --production"
 
+flag template-haskell
+  manual:
+    True
+  default:
+    False
+  description:
+    Checks if template-haskell is enabled. If so, allows Miso.Lens.TH
+
 flag tests
   manual:
     True
@@ -106,38 +109,6 @@ flag jsstring-only
   description:
     Always set MisoString = JSString
 
-executable tests
-  import:
-    js-only-tests, cpp
-  default-language:
-    Haskell2010
-  main-is:
-    Main.hs
-  ghcjs-options:
-    -dedupe
-  cpp-options:
-    -DGHCJS_BROWSER
-  hs-source-dirs:
-    tests
-  build-depends:
-    aeson,
-    base < 5,
-    bytestring,
-    ghcjs-base,
-    QuickCheck,
-    quickcheck-instances,
-    miso,
-    http-types,
-    network-uri,
-    http-api-data,
-    containers,
-    scientific,
-    servant,
-    text,
-    unordered-containers,
-    transformers,
-    vector
-
 library
   import:
     string-selector,
@@ -150,6 +121,11 @@ library
     Miso.Concurrent
     Miso.Delegate
     Miso.Diff
+    Miso.FFI.Internal
+    Miso.Internal
+  exposed-modules:
+    Miso
+    Miso.Canvas
     Miso.Effect
     Miso.Event
     Miso.Event.Decoder
@@ -157,49 +133,47 @@ library
     Miso.Exception
     Miso.Fetch
     Miso.FFI
-    Miso.FFI.History
-    Miso.FFI.SSE
-    Miso.FFI.Storage
-    -- Miso.FFI.WebSocket
-    Miso.FFI.Internal
     Miso.Html
     Miso.Html.Element
     Miso.Html.Event
     Miso.Html.Property
-    Miso.Html.Types
-    Miso.Internal
+    Miso.Lens
+    Miso.Mathml
     Miso.Mathml.Element
     Miso.Mathml.Property
+    Miso.Media
     Miso.Property
     Miso.Render
     Miso.Router
     Miso.Run
-    Miso.Storage
-    Miso.Style.Color
+    Miso.State
     Miso.Subscription
     Miso.Subscription.History
     Miso.Subscription.Keyboard
     Miso.Subscription.Mouse
-    -- Miso.Subscription.WebSocket
+    Miso.Subscription.WebSocket
     Miso.Subscription.Window
     Miso.Subscription.SSE
+    Miso.Svg
     Miso.Svg.Property
     Miso.Svg.Element
     Miso.Svg.Event
+    Miso.Storage
+    Miso.String
+    Miso.Style
+    Miso.Style.Color
+    Miso.Style.Types
     Miso.Types
     Miso.Util
-    -- Miso.WebSocket
-  exposed-modules:
-    Miso
-    Miso.Canvas
-    Miso.Lens
-    Miso.Mathml
-    Miso.Svg
-    Miso.String
-    Miso.WebSocket
-    Miso.FFI.WebSocket
-    Miso.Subscription.WebSocket
-    Miso.Style
+    Miso.Util.Lexer
+    Miso.Util.Parser
+
+  if flag (template-haskell)
+    exposed-modules:
+      Miso.Lens.TH
+    build-depends:
+      template-haskell < 2.24
+
   ghc-options:
     -Wall
   hs-source-dirs:

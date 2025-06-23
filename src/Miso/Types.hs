@@ -22,12 +22,14 @@ module Miso.Types
   ( -- ** Types
     Component        (..)
   , SomeComponent    (..)
+  , Dynamic
   , View             (..)
   , Key              (..)
   , Attribute        (..)
   , NS               (..)
   , CSS              (..)
   , LogLevel         (..)
+  , VTree            (..)
   , MountPoint
   -- ** Classes
   , ToView           (..)
@@ -35,15 +37,17 @@ module Miso.Types
   -- ** Smart Constructors
   , defaultComponent
   -- ** Components
-  , component
   , component_
-  , componentWith
-  , componentWith_
   -- ** Utils
   , getMountPoint
+  -- *** Combinators
+  , node
+  , text
+  , textRaw
+  , rawHtml
   ) where
 -----------------------------------------------------------------------------
-import           Data.Aeson (Value)
+import           Data.Aeson (Value, ToJSON)
 import           Data.JSString (JSString)
 import           Data.Kind (Type)
 import qualified Data.Map.Strict as M
@@ -59,6 +63,7 @@ import           Servant.API (HasLink(MkLink, toLink))
 import           Miso.Effect (Effect, Sub, Sink)
 import           Miso.Event.Types
 import           Miso.String (MisoString, toMisoString, ms)
+import           Miso.Style.Types (StyleSheet)
 -----------------------------------------------------------------------------
 -- | Application entry point
 data Component (name :: Symbol) model action = Component
@@ -77,6 +82,8 @@ data Component (name :: Symbol) model action = Component
   -- ^ List of CSS styles expressed as either a URL ('Href') or as 'Style' text.
   -- These styles are appended dynamically to the <head> section of your HTML page
   -- before the initial draw on <body> occurs.
+  --
+  -- @since 1.9.0.0
   , initialAction :: Maybe action
   -- ^ Initial action that is run after the application has loaded, optional
   --
@@ -100,6 +107,8 @@ data CSS
   -- ^ 'Href' is a URL meant to link to hosted CSS
   | Style MisoString
   -- ^ 'Style' is meant to be raw CSS in a 'style_' tag
+  | Sheet StyleSheet
+  -- ^ 'Sheet' is meant to be CSS built with 'Miso.Style'
   deriving (Show, Eq)
 -----------------------------------------------------------------------------
 -- | Convenience for extracting mount point
@@ -127,7 +136,8 @@ defaultComponent m u v = Component
 -- | Optional Logging for debugging miso internals (useful to see if prerendering is successful)
 data LogLevel
   = Off
-  | DebugPrerender
+  -- ^ No debug logging, the default value used in @defaultComponent@
+  | DebugHydrate
   -- ^ Will warn if the structure or properties of the
   -- DOM vs. Virtual DOM differ during prerendering.
   | DebugEvents
@@ -135,16 +145,18 @@ data LogLevel
   -- handler that raised it. Also will warn if an event handler is
   -- being used, yet it's not being listened for by the event
   -- delegator mount point.
+  | DebugNotify
+  -- ^ Will warn if a @Component@ can't be found when using @notify@ or @notify'@
   | DebugAll
   -- ^ Logs on all of the above
   deriving (Show, Eq)
 -----------------------------------------------------------------------------
 -- | Core type for constructing a virtual DOM in Haskell
 data View action
-  = VNode NS MisoString (Maybe Key) [Attribute action] [View action]
+  = VNode NS MisoString [Attribute action] [View action]
   | VText MisoString
   | VTextRaw MisoString
-  | VComp MisoString [Attribute action] (Maybe Key) SomeComponent
+  | VComp MisoString [Attribute action] SomeComponent
   deriving Functor
 -----------------------------------------------------------------------------
 -- | Existential wrapper used to allow the nesting of @Component@ in @Component@
@@ -155,53 +167,20 @@ data SomeComponent
 -- | Used in the @view@ function to embed an @Component@ into another @Component@
 -- Use this function if you'd like send messages to this @Component@ at @name@ via
 -- @notify@ or to read the state of this @Component@ via @sample@.
-component
-  :: forall name model action a . (Eq model, KnownSymbol name)
-  => Component name model action
-  -> View a
-component app = VComp (ms name) [] Nothing (SomeComponent app)
-  where
-    name = symbolVal (Proxy @name)
------------------------------------------------------------------------------
--- | Like @component@, but uses a dynamically generated @name@ (enforced via @Component@).
--- The component name is dynamically generated at runtime and available via 'ask'.
--- This is for dynamic @Component@ creation, where a mounted @Component@ isn't necessarily
--- statically known. Use this during circumstances where a parent would like
--- to dynamically generate / destroy n-many children in response to user input.
---
--- Note: the @name@ parameter is @()@ here.
--- This symbolizes the fact that the @Component@ is dynamically generated
--- and it's /component-id/ can only be known at runtime.
---
 component_
-  :: Eq model
-  => Component "" model action
-  -> View a
-component_ vcomp = VComp mempty [] Nothing (SomeComponent vcomp)
------------------------------------------------------------------------------
--- | Like @component@ except it allows the specification of @Key@
--- and @Attribute action@.
-componentWith
   :: forall name model action a . (Eq model, KnownSymbol name)
   => Component name model action
-  -> Maybe Key
   -> [Attribute a]
   -> View a
-componentWith app key attrs = VComp (ms name) attrs key (SomeComponent app)
+component_ app attrs = VComp (ms name) attrs (SomeComponent app)
   where
     name = symbolVal (Proxy @name)
 -----------------------------------------------------------------------------
--- | Like @component_@ except it allows the specification of @Key@
--- and @Attribute action@. Note: the @name@ parameter is @()@ here.
--- This symbolizes the fact that the @Component@ is dynamically generated
--- and it's /component-id/ can only be known at runtime.
-componentWith_
-  :: Eq model
-  => Component "" model action
-  -> Maybe Key
-  -> [Attribute a]
-  -> View a
-componentWith_ vcomp key attrs = VComp mempty attrs key (SomeComponent vcomp)
+-- | Type synonym for Dynamically constructed @Component@
+-- @
+-- sampleComponent :: Component Dynamic Model Action
+-- @
+type Dynamic = ""
 -----------------------------------------------------------------------------
 -- | For constructing type-safe links
 instance HasLink (View a) where
@@ -240,7 +219,7 @@ instance ToJSVal NS where
 -- of a given DOM node must be unique. Failure to satisfy this
 -- invariant gives undefined behavior at runtime.
 newtype Key = Key MisoString
-  deriving (Show, Eq, IsString)
+  deriving (Show, Eq, IsString, ToJSON)
 -----------------------------------------------------------------------------
 -- | ToJSVal instance for Key
 instance ToJSVal Key where
@@ -294,4 +273,40 @@ data Attribute action
 -- | @IsString@ instance
 instance IsString (View a) where
   fromString = VText . fromString
+-----------------------------------------------------------------------------
+-- | Virtual DOM implemented as a JavaScript `Object`.
+--   Used for diffing, patching and event delegation.
+--   Not meant to be constructed directly, see `View` instead.
+newtype VTree = VTree { getTree :: Object }
+-----------------------------------------------------------------------------
+-- | Create a new @Miso.Types.TextRaw@.
+--
+-- @expandable@
+-- a 'rawHtml' node takes raw HTML and attempts to convert it to a 'VTree'
+-- at runtime. This is a way to dynamically populate the virtual DOM from
+-- HTML received at runtime. If rawHtml cannot parse the HTML it will not render.
+rawHtml
+  :: MisoString
+  -> View action
+rawHtml = VTextRaw
+-----------------------------------------------------------------------------
+-- | Create a new @Miso.Types.VNode@.
+--
+-- @node ns tag key attrs children@ creates a new node with tag @tag@
+-- and 'Key' @key@ in the namespace @ns@. All @attrs@ are called when
+-- the node is created and its children are initialized to @children@.
+node :: NS
+     -> MisoString
+     -> [Attribute action]
+     -> [View action]
+     -> View action
+node = VNode
+-----------------------------------------------------------------------------
+-- | Create a new @Text@ with the given content.
+text :: MisoString -> View action
+text = VText
+-----------------------------------------------------------------------------
+-- | `TextRaw` creation. Don't use directly
+textRaw :: MisoString -> View action
+textRaw = VTextRaw
 -----------------------------------------------------------------------------

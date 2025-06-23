@@ -19,6 +19,7 @@ module Miso.FFI.Internal
    , syncCallback1
    , asyncCallback
    , asyncCallback1
+   , asyncCallback2
    , ghcjsPure
    , syncPoint
    , addEventListener
@@ -38,6 +39,7 @@ module Miso.FFI.Internal
    , set
    , getBody
    , getDocument
+   , getContext
    , getElementById
    , diff
    , integralToJSString
@@ -52,12 +54,15 @@ module Miso.FFI.Internal
    , alert
    , reload
    , getComponent
-   , setBodyComponent
+   , setComponentId
    , addStyle
    , addStyleSheet
-   , fetchJSON
+   , fetch
    , shouldSync
    , setComponent
+   , flush
+   , requestAnimationFrame
+   , setDrawingContext
    , Image (..)
    , newImage
    ) where
@@ -98,6 +103,14 @@ asyncCallback1 f = asyncFunction handle
   where
     handle _ _ []    = error "asyncCallback1: no args, impossible"
     handle _ _ (x:_) = f x
+-----------------------------------------------------------------------------
+-- | Creates an asynchronous callback function with a single argument
+asyncCallback2 :: (JSVal -> JSVal -> JSM ()) -> JSM Function
+asyncCallback2 f = asyncFunction handle
+  where
+    handle _ _ []    = error "asyncCallback2: no args, impossible"
+    handle _ _ [_]   = error "asyncCallback2: 1 arg, impossible"
+    handle _ _ (x:y:_) = f x y
 -----------------------------------------------------------------------------
 syncCallback1 :: (JSVal -> JSM ()) -> JSM Function
 syncCallback1 f = function handle
@@ -268,6 +281,14 @@ getBody = jsg "document" ! "body"
 getDocument :: JSM JSVal
 getDocument = jsg "document"
 -----------------------------------------------------------------------------
+-- | Retrieves a reference to the context.
+--
+-- This is a miso specific construct used to provide an identical interface
+-- for both native (iOS / Android, etc.) and browser environments.
+--
+getContext :: JSM JSVal
+getContext = jsg "miso" ! "context"
+-----------------------------------------------------------------------------
 -- | Returns an Element object representing the element whose id property matches
 -- the specified string.
 --
@@ -286,7 +307,8 @@ diff
   -> JSM ()
 diff (Object a) (Object b) c = do
   moduleMiso <- jsg "miso"
-  void $ moduleMiso # "diff" $ [a,b,c]
+  context <- getContext
+  void $ moduleMiso # "diff" $ [a,b,c,context]
 -----------------------------------------------------------------------------
 -- | Helper function for converting Integral types to JavaScript strings
 integralToJSString :: Integral a => a -> MisoString
@@ -302,8 +324,10 @@ jsStringToDouble = read . unpack
 -----------------------------------------------------------------------------
 -- | Initialize event delegation from a mount point.
 delegateEvent :: JSVal -> JSVal -> Bool -> JSM JSVal -> JSM ()
-delegateEvent mountPoint events debug getVTree =
-  delegate mountPoint events debug =<< function handler
+delegateEvent mountPoint events debug getVTree = do
+  ctx <- getContext
+  cb <- function handler
+  delegate mountPoint events debug cb ctx
     where
       handler _ _ [] = error "delegate: no args - impossible state"
       handler _ _ (continuation : _) =
@@ -311,27 +335,29 @@ delegateEvent mountPoint events debug getVTree =
 -----------------------------------------------------------------------------
 -- | Deinitialize event delegation from a mount point.
 undelegateEvent :: JSVal -> JSVal -> Bool -> JSM JSVal -> JSM ()
-undelegateEvent mountPoint events debug getVTree =
-  undelegate mountPoint events debug =<< function handler
+undelegateEvent mountPoint events debug getVTree = do
+  ctx <- getContext
+  cb <- function handler
+  undelegate mountPoint events debug cb ctx
     where
       handler _ _ [] = error "undelegate: no args - impossible state"
       handler _ _ (continuation : _) =
         void (call continuation global =<< getVTree)
 -----------------------------------------------------------------------------
 -- | Call 'delegateEvent' JavaScript function
-delegate :: JSVal -> JSVal -> Bool -> Function -> JSM ()
-delegate mountPoint events debug callback = do
+delegate :: JSVal -> JSVal -> Bool -> Function -> JSVal -> JSM ()
+delegate mountPoint events debug callback ctx = do
   d <- toJSVal debug
   cb <- toJSVal callback
   moduleMiso <- jsg "miso"
-  void $ moduleMiso # "delegate" $ [mountPoint,events,cb,d]
+  void $ moduleMiso # "delegate" $ [mountPoint,events,cb,d,ctx]
 -----------------------------------------------------------------------------
-undelegate :: JSVal -> JSVal -> Bool -> Function -> JSM ()
-undelegate mountPoint events debug callback = do
+undelegate :: JSVal -> JSVal -> Bool -> Function -> JSVal -> JSM ()
+undelegate mountPoint events debug callback ctx = do
   d <- toJSVal debug
   cb <- toJSVal callback
   moduleMiso <- jsg "miso"
-  void $ moduleMiso # "undelegate" $ [mountPoint,events,cb,d]
+  void $ moduleMiso # "undelegate" $ [mountPoint,events,cb,d,ctx]
 -----------------------------------------------------------------------------
 -- | Copies DOM pointers into virtual dom
 -- entry point into isomorphic javascript
@@ -341,8 +367,9 @@ undelegate mountPoint events debug callback = do
 hydrate :: Bool -> JSVal -> JSVal -> JSM ()
 hydrate logLevel mountPoint vtree = void $ do
   ll <- toJSVal logLevel
+  context <- getContext
   moduleMiso <- jsg "miso"
-  void $ moduleMiso # "hydrate" $ [ll, mountPoint, vtree]
+  void $ moduleMiso # "hydrate" $ [ll, mountPoint, vtree, context]
 -----------------------------------------------------------------------------
 -- | Fails silently if the element is not found.
 --
@@ -380,12 +407,10 @@ reload :: JSM ()
 reload = void $ jsg "location" # "reload" $ ([] :: [MisoString])
 -----------------------------------------------------------------------------
 -- | Sets the body with data-component-id
-setBodyComponent :: MisoString -> JSM ()
-setBodyComponent name = do
-  component <- toJSVal name
-  node <- jsg "document" ! "body"
-  moduleMiso <- jsg "miso"
-  void $ moduleMiso # "setComponent" $ [node, component]
+setComponentId :: MisoString -> JSM ()
+setComponentId componentId = do
+  moduleMiso <- jsg "miso" ! "context"
+  void $ moduleMiso # "setComponentId" $ [componentId]
 -----------------------------------------------------------------------------
 -- | Sets @data-component-id@ on the node given by second argument to a value given by the first argument
 setComponent :: MisoString -> JSVal -> JSM ()
@@ -426,7 +451,7 @@ addStyleSheet url = do
 --
 -- See <https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API>
 --
-fetchJSON
+fetch
   :: FromJSON action
   => MisoString
   -- ^ url
@@ -441,7 +466,7 @@ fetchJSON
   -> (MisoString -> JSM ())
   -- ^ errorful callback
   -> JSM ()
-fetchJSON url method maybeBody headers successful errorful = do
+fetch url method maybeBody headers successful errorful = do
   successful_ <- toJSVal =<< do
     asyncCallback1 $ \jval ->
       fromJSON <$> fromJSValUnchecked jval >>= \case
@@ -476,9 +501,19 @@ fetchJSON url method maybeBody headers successful errorful = do
 --
 shouldSync :: JSVal -> JSM Bool
 shouldSync vnode = do
-  moduleMiso <- jsg "miso"
-  fromJSValUnchecked =<< do
-    moduleMiso # "shouldSync" $ [vnode]
+  returnValue <- jsg "miso" # "shouldSync" $ [vnode]
+  fromJSValUnchecked returnValue
+-----------------------------------------------------------------------------
+flush :: JSM ()
+flush = do
+  context <- jsg "miso" ! "context"
+  void $ context # "flush" $ ([] :: [JSVal])
+-----------------------------------------------------------------------------
+requestAnimationFrame :: JSM () -> JSM ()
+requestAnimationFrame f = do
+  context <- jsg "miso" ! "context"
+  cb <- syncCallback f
+  void $ context # "requestAnimationFrame" $ [cb]
 -----------------------------------------------------------------------------
 newtype Image = Image JSVal
   deriving (ToJSVal)
@@ -489,4 +524,11 @@ newImage url = do
   img <- new (jsg "Image") ([] :: [MisoString])
   img <# "src" $ url
   pure (Image img)
+-----------------------------------------------------------------------------
+-- | Used to select a drawing context. Users can override the default DOM renderer
+-- by implementing their own Context, and exporting it to the global scope. This
+-- opens the door to different rendering engines, ala miso-native.
+setDrawingContext :: MisoString -> JSM ()
+setDrawingContext rendererName =
+  void $ jsg "miso" # "setDrawingContext" $ [rendererName]
 -----------------------------------------------------------------------------

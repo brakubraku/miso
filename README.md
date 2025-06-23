@@ -20,9 +20,6 @@
   <a href="https://actions-badge.atrox.dev/dmjio/miso/goto?ref=master">
     <img alt="Build Status" src="https://img.shields.io/endpoint.svg?url=https%3A%2F%2Factions-badge.atrox.dev%2Fdmjio%2Fmiso%2Fbadge%3Fref%3Dmaster&style=flat-square" />
   </a>
-  <a href="https://discord.gg/QVDtfYNSxq">
-    <img alt="Discord" src="https://img.shields.io/discord/1302720467232096358?style=flat-square&label=discord&logoColor=7289da">
-  </a>
   <a href="http://hackage.haskell.org/package/miso">
     <img src="https://img.shields.io/hackage/v/miso.svg?style=flat-square" alt="Hackage">
   </a>
@@ -57,11 +54,12 @@
 - [Nix](#nix)
   - [Pinning nixpkgs](#pinning-nixpkgs)
   - [Binary cache](#binary-cache)
+- [Community](#community)
 - [Maintainers](#maintainers)
 - [Contributing](#contributing)
 - [Contributors](#contributors)
 - [Partnerships](#partnerships)
-- [Financial contributors](#financial-contributors)
+- [Backers](#backers)
 - [Organizations](#organizations)
 - [License](#license)
 
@@ -295,12 +293,6 @@ if arch(wasm32)
   -- Required for TemplateHaskell. When using wasm32-wasi-cabal from
   -- ghc-wasm-meta, this is superseded by the global cabal.config.
   shared: True
-
-  -- https://github.com/haskellari/splitmix/pull/73
-  source-repository-package
-    type: git
-    location: https://github.com/amesgen/splitmix
-    tag: cea9e31bdd849eb0c17611bb99e33d590e126164
 ```
 
 Call `wasm32-wasi-cabal build --allow-newer` and a `WASM` payload should be created in `dist-newstyle/` directory.
@@ -335,6 +327,9 @@ But, we're not done yet. In order to view this in the browser there are still a 
 > See the [official documentation](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html) for more information.
 
 To start, we recommend creating an `app.wasmexe` folder to store the additional artifacts required.
+
+> [!TIP]
+> We recommend using an up-to-date `node` version (currently tested with `v24.2.0`) to ensure `post-link.mjs` works properly.
 
 ```bash
 # Creates the directory for hosting
@@ -429,7 +424,7 @@ Using [GHCup](https://www.haskell.org/ghcup/) you should be able to acquire the 
 > Use [cachix](https://cachix.org) to ensure you're not building dependencies unnecessarily `cachix use haskell-miso-cachix`
 
 ```bash
-❯ nix-shell -p pkgs.pkgsCross.ghcjs.haskell.packages.ghc9122.ghc -I nixpkgs=https://github.com/NixOS/nixpkgs/archive/65f179f903e8bbeff3215cd613bdc570940c0eab.tar.gz
+nix-shell -p pkgs.pkgsCross.ghcjs.haskell.packages.ghc9122.ghc -I nixpkgs=https://github.com/NixOS/nixpkgs/archive/65f179f903e8bbeff3215cd613bdc570940c0eab.tar.gz
 ```
 
 > [!NOTE]
@@ -439,7 +434,7 @@ Using [GHCup](https://www.haskell.org/ghcup/) you should be able to acquire the 
 > Alternatively, if you'd like to install the compiler into your global environment (so you don't need to develop inside a `bash` shell) you can use the following command.
 >
 > ```bash
-> ❯ nix-env -iA pkgs.pkgsCross.ghcjs.haskell.packages.ghc9122.ghc -f https://github.com/NixOS/nixpkgs/archive/65f179f903e8bbeff3215cd613bdc570940c0eab.tar.gz
+> nix-env -iA pkgs.pkgsCross.ghcjs.haskell.packages.ghc9122.ghc -f https://github.com/NixOS/nixpkgs/archive/65f179f903e8bbeff3215cd613bdc570940c0eab.tar.gz
 > ```
 
 - `cabal.project`
@@ -545,6 +540,8 @@ For real-world examples of Haskell `miso` applications, see below.
 | **Router**      | A client-side routing example          | [Source](https://github.com/dmjio/miso/blob/master/examples/router/Main.hs)      | [Demo](https://router.haskell-miso.org/)      | [@dmjio](https://github.com/dmjio)   |
 | **Canvas 2D**   | A 2D Canvas rendering example          | [Source](https://github.com/dmjio/miso/blob/master/examples/canvas2d/Main.hs)    | [Demo](https://canvas.haskell-miso.org/)      | [@dmjio](https://github.com/dmjio)   |
 | **Space Invaders**   | A Space-Invaders-like game       | [Source](https://gitlab.com/juliendehos/miso-invaders)    | [Demo](https://juliendehos.gitlab.io/miso-invaders/)      | [@juliendehos](https://github.com/juliendehos)   |
+| **Audio**   | Audio examples       | [Source](https://github.com/juliendehos/miso-audio-test)    | [Demo](https://juliendehos.github.io/miso-audio-test/)      | [@juliendehos](https://github.com/juliendehos)   |
+| **Video**   | Video examples       | [Source](https://github.com/juliendehos/miso-video-test)    | [Demo](https://juliendehos.github.io/miso-video-test/)      | [@juliendehos](https://github.com/juliendehos)   |
 
 ## Building examples
 
@@ -592,7 +589,7 @@ Serving HTTP on 0.0.0.0 port 8000 ...
 
 If you want to interact with an HTTP API, we recommend one of the following approaches:
 
-  1. For a simple JSON-based API, you can use Miso's `fetchJSON` function.
+  1. For a simple JSON-based API, you can use Miso's `fetch` function.
 
   2. In more complex cases, you can define a [Servant](https://www.servant.dev/) API and automatically obtain client functions via `servant-client-js` (or any other `servant-client-core`-based backend).
 
@@ -607,10 +604,10 @@ If you want to interact with an HTTP API, we recommend one of the following appr
 
 ## Coverage ✅
 
-The core engine of `miso` is the [diff](https://github.com/dmjio/miso/blob/master/ts/dom.ts) function. It is responsible for all DOM manipulation that occurs in a miso application and has [100% code coverage](http://coverage.haskell-miso.org). Tests and coverage made possible using [bun](https://github.com/oven-sh/bun).
+The core engine of `miso` is the [diff](https://github.com/dmjio/miso/blob/master/ts/miso/dom.ts) function. It is responsible for all DOM manipulation that occurs in a miso application and has [100% code coverage](http://coverage.haskell-miso.org). Tests and coverage made possible using [bun](https://github.com/oven-sh/bun).
 
 > [!NOTE]
-> To run the tests and build the coverage report ensure [bun](https://github.com/oven.sh/bun) is installed.
+> To run the tests and build the coverage report ensure [bun](https://github.com/oven-sh/bun) is installed.
 
 ```bash
 $ curl -fsSL https://bun.sh/install | bash
@@ -649,7 +646,7 @@ All files           |   92.37 |   85.48 |
 [Isomorphic javascript](https://en.wikipedia.org/wiki/Isomorphic_JavaScript) is a technique for increased SEO, code-sharing and perceived page load times. It works in two parts. First, the server sends a pre-rendered HTML body to the client's browser. Second, after the client javascript application loads, the pointers of the pre-rendered DOM are copied into the virtual DOM (a process known as [hydration](https://en.wikipedia.org/wiki/Hydration_(web_development))), and the application proceeds as normal. All subsequent page navigation is handled locally by the client, while avoiding full-page postbacks.
 
 > [!NOTE]
-> The [miso](https://haddocks.haskell-miso.org/Miso.html#v:miso) function is used to facilitate the pointer-copying behavior client-side.
+> The [miso](https://haddocks.haskell-miso.org/miso/Miso.html#v:miso) function is used to facilitate the pointer-copying behavior client-side.
 
 ## Benchmarks 🏎️
 
@@ -682,6 +679,13 @@ By default `miso` uses a known-to-work, pinned version of [`nixpkgs`](https://gi
 $ cachix use haskell-miso-cachix
 ```
 
+## Community 🫶
+
+- [Matrix](https://matrix.to/#/#haskell-miso:matrix.org)
+- [Discord](https://discord.gg/QVDtfYNSxq)
+- [Slack](https://haskell-miso.slack.com/join/shared_invite_confirmed/zt-37vusrcdw-HH6~hY0DGT7MLCjNWZvLDQ#/email-invite/credentials)
+- [IRC](https://www.irccloud.com/invite?channel=%23haskell-miso&hostname=irc.libera.chat&port=6697&ssl=1)
+
 ## Maintainers
 
 [@dmjio](https://github.com/dmjio)
@@ -703,7 +707,7 @@ See [CONTRIBUTING](https://github.com/dmjio/miso/blob/master/CONTRIBUTING.md) fo
 
 If you'd like to support this project financially, be it through requesting feature development, or a corporate partnership, please drop us a line and we will be in touch shortly. <p><a href="mailto:code@dmj.io">code@dmj.io</a></p>
 
-## Financial contributors
+## Backers
 
 Become a [financial contributor](https://opencollective.com/miso/contribute) and help us sustain our project and community. We are very grateful and thankful for our individual sponsors.
 

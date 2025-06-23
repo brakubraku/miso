@@ -41,7 +41,7 @@ type MainModel = Bool
 
 main :: IO ()
 main = run $ startComponent app
-  { logLevel = DebugPrerender
+  { logLevel = DebugHydrate
   , subs = []
   }
 
@@ -100,17 +100,23 @@ viewModel1 x =
         , button_ [onClick SampleChild] [text "Sample Child (unsafe)"]
         , if x
             then
-                componentWith counterComponent2 Nothing
+                component_ counterComponent2
                   [ onMounted MountMain
                   , onUnmounted UnMountMain
                   ]
             else div_ [id_ "other test"] ["Main application content"]
         ]
 
+data LoggerSub = LoggerSub
+  deriving (Eq, Ord)
+
+instance ToMisoString LoggerSub where
+  toMisoString LoggerSub = "LoggerSub"
+
 -- | Updates model, optionally introduces side effects
 updateModel1 :: MainAction -> Effect MainModel MainAction
-updateModel1 StartLogger = startSub "logger" (loggerSub "main-app")
-updateModel1 StopLogger  = stopSub "logger"
+updateModel1 StartLogger = startSub LoggerSub (loggerSub "main-app")
+updateModel1 StopLogger  = stopSub LoggerSub
 updateModel1 Toggle = modify not
 updateModel1 UnMountMain =
   io_ (consoleLog "Component 2 was unmounted!")
@@ -150,7 +156,7 @@ viewModel2 x =
         , button_ [onClick AddOne] [text "+"]
         , text (ms x)
         , button_ [onClick SubtractOne] [text "-"]
-        , componentWith counterComponent3 Nothing
+        , component_ counterComponent3
           [ onMounted (Mount "3")
           , onUnmounted (UnMount "3")
           ]
@@ -190,12 +196,12 @@ viewModel3 (toggle, x) =
                -- If you are replacing an unnamed component (using 'component_') with anything else (e.g. 'vtext', 'vnode',
                -- 'vcomp', null), then you don't need to worry about this.
                then
-                 componentWith counterComponent4 Nothing
+                 component_ counterComponent4
                    [ onMounted (Mount "4")
                    , onUnmounted (UnMount "4")
                    ]
                else
-                 componentWith counterComponent5 Nothing
+                 component_ counterComponent5
                    [ onMounted (Mount "5")
                    , onUnmounted (UnMount "5")
                    ]
@@ -246,17 +252,26 @@ updateModel5 AddOne = do
   _1 += 1
   maybeChildId <- use _2
   forM_ maybeChildId $ \childId ->
-    io_ (notify' childId AddOne)
+    io_ (notify' childId counterComponent6 AddOne)
   io_ (notify counterComponent2 AddOne)
 updateModel5 SubtractOne = do
   _1 -= 1
   io_ (notify counterComponent2 SubtractOne)
-updateModel5 Sample =
+updateModel5 Sample = do
   io_ $ do
     componentTwoModel <- sample counterComponent2
     consoleLog $
       "Sampling parent component 2 from child component 5: " <>
          ms (show componentTwoModel)
+
+  maybeChildId <- use _2
+  io_ $ do
+    forM_ maybeChildId $ \childId -> do
+      componentTwoModel <- sample' childId counterComponent6
+      consoleLog $
+        "Sampling parent component 6 from child component 5: " <>
+           ms (show componentTwoModel)
+
 updateModel5 SayHelloWorld = do
   io_ (consoleLog "Hello World from Component 5")
 updateModel5 (Mount childId) = do
@@ -276,14 +291,14 @@ viewModel5 (x, _) =
         , button_ [onClick Sample] [text "Sample Component 2 state"]
         , "Here is dynamic component 6..."
         , br_ []
-        , componentWith_ counterComponent6 Nothing
+        , component_ counterComponent6
           [ onMountedWith Mount
           ]
         ]
 
 -- | "" here means the component is given a dynamically generated name, can also leave generic
 -- the component_ or componentWith_
-counterComponent6 :: Component "" Model Action
+counterComponent6 :: Component Dynamic Model Action
 counterComponent6 = defaultComponent 0 updateModel6 viewModel6
 
 -- | Updates model, optionally introduces side effects

@@ -44,13 +44,13 @@ module Miso.Mathml.Element
   , semantics_
   ) where
 -----------------------------------------------------------------------------
-import           Miso.Html.Types
+import           Miso.Types
 import           Miso.String (MisoString)
 -----------------------------------------------------------------------------
 -- | Low-level helper used to construct 'MATHML' 'node' in 'View'.
 -- Most View helpers in this module are defined in terms of it.
 nodeMathml :: MisoString -> [Attribute action] -> [View action] -> View action
-nodeMathml nodeName = node MATHML nodeName Nothing
+nodeMathml nodeName = node MATHML nodeName
 -----------------------------------------------------------------------------
 -- | [\<annotation-xml\>](https://developer.mozilla.org/en-US/docs/Web/MathML/Reference/Element/annotation-xml)
 --

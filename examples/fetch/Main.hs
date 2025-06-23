@@ -20,10 +20,7 @@ module Main where
 import           Data.Aeson
 import           Data.Maybe
 import           GHC.Generics
-import           Language.Javascript.JSaddle (JSM)
-import           Data.Proxy
 import           Servant.API
-import           Servant.Client.JS (ClientEnv (..), ClientError, parseBaseUrl, client, runClientM)
 ----------------------------------------------------------------------------
 import           Miso hiding (defaultOptions)
 import           Miso.String
@@ -68,19 +65,9 @@ emptyModel = Model Nothing
 -- | GitHub API method
 type GithubAPI = Get '[JSON] GitHub
 ----------------------------------------------------------------------------
--- | Uses servant to reify type-safe calls to the Fetch API
-getGithubAPI
-  :: JSM (Either ClientError GitHub)
-getGithubAPI = do
-    baseUrl <- parseBaseUrl "https://api.github.com"
-    runClientM c (ClientEnv baseUrl)
-  where
-    c = Servant.Client.JS.client (Proxy @GithubAPI)
-----------------------------------------------------------------------------
 updateModel :: Action -> Effect Model Action
-updateModel FetchGitHub = io $ getGithubAPI <&> \case
-  Right r -> SetGitHub r
-  Left e  -> ErrorHandler $ ms (show e)
+updateModel FetchGitHub =
+  fetch "https://api.github.com" "GET" Nothing [] SetGitHub ErrorHandler
 updateModel (SetGitHub apiInfo) =
   info ?= apiInfo
 updateModel (ErrorHandler msg) =
@@ -154,36 +141,36 @@ viewModel m = view
 -- | Structure to capture the JSON returned from https://api.github.com
 data GitHub
   = GitHub
-  { currentUserUrl                   :: MisoString
-  , currentUserAuthorizationsHtmlUrl :: MisoString
-  , authorizationsUrl                :: MisoString
-  , codeSearchUrl                    :: MisoString
-  , commitSearchUrl                  :: MisoString
-  , emailsUrl                        :: MisoString
-  , emojisUrl                        :: MisoString
-  , eventsUrl                        :: MisoString
-  , feedsUrl                         :: MisoString
-  , followersUrl                     :: MisoString
-  , followingUrl                     :: MisoString
-  , gistsUrl                         :: MisoString
-  , hubUrl                           :: MisoString
-  , issueSearchUrl                   :: MisoString
-  , issuesUrl                        :: MisoString
-  , keysUrl                          :: MisoString
-  , notificationsUrl                 :: MisoString
-  , organizationRepositoriesUrl      :: MisoString
-  , organizationUrl                  :: MisoString
-  , publicGistsUrl                   :: MisoString
-  , rateLimitUrl                     :: MisoString
-  , repositoryUrl                    :: MisoString
-  , repositorySearchUrl              :: MisoString
-  , currentUserRepositoriesUrl       :: MisoString
-  , starredUrl                       :: MisoString
-  , starredGistsUrl                  :: MisoString
-  , userUrl                          :: MisoString
-  , userOrganizationsUrl             :: MisoString
-  , userRepositoriesUrl              :: MisoString
-  , userSearchUrl                    :: MisoString
+  { currentUserUrl
+  , currentUserAuthorizationsHtmlUrl
+  , authorizationsUrl
+  , codeSearchUrl
+  , commitSearchUrl
+  , emailsUrl
+  , emojisUrl
+  , eventsUrl
+  , feedsUrl
+  , followersUrl
+  , followingUrl
+  , gistsUrl
+  , hubUrl
+  , issueSearchUrl
+  , issuesUrl
+  , keysUrl
+  , notificationsUrl
+  , organizationRepositoriesUrl
+  , organizationUrl
+  , publicGistsUrl
+  , rateLimitUrl
+  , repositoryUrl
+  , repositorySearchUrl
+  , currentUserRepositoriesUrl
+  , starredUrl
+  , starredGistsUrl
+  , userUrl
+  , userOrganizationsUrl
+  , userRepositoriesUrl
+  , userSearchUrl :: MisoString
   } deriving (Show, Eq, Generic)
 ----------------------------------------------------------------------------
 instance FromJSON GitHub where

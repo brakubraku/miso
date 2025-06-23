@@ -1,5 +1,6 @@
 -----------------------------------------------------------------------------
 {-# LANGUAGE CPP                       #-}
+{-# LANGUAGE NamedFieldPuns            #-}
 {-# LANGUAGE RecordWildCards           #-}
 {-# LANGUAGE TemplateHaskell           #-}
 {-# OPTIONS_GHC -Wno-duplicate-exports #-}
@@ -18,6 +19,7 @@ module Miso
     miso
   , (🍜)
   , startComponent
+  , renderComponent
     -- ** Sink
   , withSink
   , Sink
@@ -31,7 +33,6 @@ module Miso
   , startSub
   , stopSub
   , Sub
-  , SubName
   -- ** Effect
   , issue
   , batch
@@ -48,6 +49,8 @@ module Miso
     -- * Html
   , module Miso.Html
   , module Miso.Render
+    -- * Property
+  , module Miso.Property
     -- * Router
   , module Miso.Router
     -- * Run
@@ -65,24 +68,16 @@ module Miso
     -- * FFI
   , module Miso.FFI
     -- * State management
-  , ask
-  , modify
-  , modify'
-  , get
-  , gets
-  , put
-  , tell
+  , module Miso.State
   ) where
 -----------------------------------------------------------------------------
 import           Control.Monad (void)
 import           Control.Monad.IO.Class (liftIO)
-import           Control.Monad.RWS (get, gets, modify, modify', tell, put, ask)
-import           Data.IORef (newIORef)
+import           Data.IORef (newIORef, IORef)
 import           Language.Javascript.JSaddle (Object(Object), JSM)
 #ifndef GHCJS_BOTH
 import           Data.FileEmbed (embedStringFile)
 import           Language.Javascript.JSaddle (eval)
-import           Miso.String (MisoString)
 #endif
 -----------------------------------------------------------------------------
 import           Miso.Diff
@@ -98,7 +93,9 @@ import           Miso.Property
 import           Miso.Render
 import           Miso.Router
 import           Miso.Run
+import           Miso.State
 import           Miso.Storage
+import           Miso.String (MisoString)
 import           Miso.Subscription
 import           Miso.Types
 import           Miso.Util
@@ -112,11 +109,11 @@ miso f = withJS $ do
   app@Component {..} <- f <$> getURI
   initialize app $ \snk -> do
     renderStyles styles
-    VTree (Object vtree) <- runView Prerender (view model) snk logLevel events
+    VTree (Object vtree) <- runView Hydrate (view model) snk logLevel events
     let name = getMountPoint mountPoint
-    FFI.setBodyComponent name
+    FFI.setComponentId name
     mount <- FFI.getBody
-    FFI.hydrate (logLevel `elem` [DebugPrerender, DebugAll]) mount vtree
+    FFI.hydrate (logLevel `elem` [DebugHydrate, DebugAll]) mount vtree
     viewRef <- liftIO $ newIORef $ VTree (Object vtree)
     pure (name, mount, viewRef)
 -----------------------------------------------------------------------------
@@ -127,12 +124,39 @@ miso f = withJS $ do
 -- | Runs a miso application
 -- Initializes application at 'mountPoint' (defaults to \<body\> when @Nothing@)
 startComponent :: Eq model => Component name model action -> JSM ()
-startComponent app@Component {..} = withJS $
-  initialize app $ \snk -> do
-    renderStyles styles
-    vtree <- runView DontPrerender (view model) snk logLevel events
+startComponent vcomp@Component { styles } = withJS $ initComponent vcomp (renderStyles styles)
+----------------------------------------------------------------------------
+-- | Runs a miso application, but with a custom rendering engine.
+-- The @MisoString@ specified here is the variable name of a globally-scoped
+-- JS object that implements the context interface per 'ts/miso/context/dom.ts'
+-- This is necessary for native support.
+renderComponent
+  :: Eq model
+  => Maybe MisoString
+  -- ^ Name of the JS object that contains the drawing context
+  -> Component name model action
+  -- ^ Component application
+  -> JSM ()
+  -- ^ Custom hook to perform any JSM action (e.g. render styles) before initialization.
+  -> JSM ()
+renderComponent Nothing component _ = startComponent component
+renderComponent (Just renderer) vcomp hooks = withJS $ do
+  FFI.setDrawingContext renderer
+  initComponent vcomp hooks
+----------------------------------------------------------------------------
+-- | Internal helper function to support both 'render' and 'startComponent'
+initComponent
+  :: Eq model
+  => Component name model action
+  -- ^ Component application
+  -> JSM ()
+  -- ^ Custom hook to perform any JSM action (e.g. render styles) before initialization.
+  -> JSM (IORef VTree)
+initComponent vcomp@Component{..} hooks = do
+  initialize vcomp $ \snk -> hooks >> do
+    vtree <- runView Draw (view model) snk logLevel events
     let name = getMountPoint mountPoint
-    FFI.setBodyComponent name
+    FFI.setComponentId name
     mount <- mountElement name
     diff Nothing (Just vtree) mount
     viewRef <- liftIO (newIORef vtree)

@@ -11,11 +11,14 @@
 -----------------------------------------------------------------------------
 module Miso.Style.Color
   ( -- *** Types
-    Color (RGBA, HSL, Hex)
+    Color (RGB, RGBA, HSL, HSLA, Hex)
     -- *** Smart constructor
   , rgba
+  , rgb
   , hsl
+  , hsla
   , hex
+  , var
     -- *** Render
   , renderColor
     -- *** Colors
@@ -176,8 +179,11 @@ import           Prelude hiding (tan)
 -----------------------------------------------------------------------------
 data Color
   = RGBA Int Int Int Double
+  | RGB Int Int Int
   | HSL Int Int Int
+  | HSLA Int Int Int Double
   | Hex MisoString
+  | VarColor MisoString
   deriving (Show, Eq)
 -----------------------------------------------------------------------------
 renderColor :: Color -> MisoString
@@ -189,6 +195,21 @@ renderColor (RGBA r g b a) = "rgba(" <> values <> ")"
       , MS.ms b
       , MS.ms a
       ]
+renderColor (RGB r g b) = "rgb(" <> values <> ")"
+  where
+    values = MS.intercalate ","
+      [ MS.ms r
+      , MS.ms g
+      , MS.ms b
+      ]
+renderColor (HSLA h s l a) = "hsla(" <> values <> ")"
+  where
+    values = MS.intercalate ","
+      [ MS.ms h
+      , MS.ms s
+      , MS.ms l
+      , MS.ms a
+      ]
 renderColor (HSL h s l) = "hsl(" <> values <> ")"
   where
     values = MS.intercalate ","
@@ -197,12 +218,22 @@ renderColor (HSL h s l) = "hsl(" <> values <> ")"
       , MS.ms l
       ]
 renderColor (Hex s) = "#" <> s
+renderColor (VarColor n) = "var(--" <> n <> ")"
+-----------------------------------------------------------------------------
+var :: MisoString -> Color
+var = VarColor
 -----------------------------------------------------------------------------
 rgba :: Int -> Int -> Int -> Double -> Color
 rgba = RGBA
 -----------------------------------------------------------------------------
+rgb :: Int -> Int -> Int -> Color
+rgb = RGB
+-----------------------------------------------------------------------------
 hsl :: Int -> Int -> Int -> Color
 hsl = HSL
+-----------------------------------------------------------------------------
+hsla :: Int -> Int -> Int -> Double -> Color
+hsla = HSLA
 -----------------------------------------------------------------------------
 hex :: MisoString -> Color
 hex = Hex
