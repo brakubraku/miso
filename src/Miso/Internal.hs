@@ -9,6 +9,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE NamedFieldPuns #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso.Internal
@@ -52,7 +53,7 @@ import           Language.Javascript.JSaddle hiding (Sync, Result)
 #else
 import           Language.Javascript.JSaddle
 #endif
-import           GHC.Conc (ThreadStatus(ThreadDied, ThreadFinished), ThreadId, killThread, threadStatus)
+import           GHC.Conc (ThreadStatus(ThreadDied, ThreadFinished), threadStatus)
 import           Prelude hiding (null)
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Mem.StableName (makeStableName)
@@ -70,6 +71,12 @@ import           Miso.Style (renderStyleSheet)
 import           Miso.Event (Events)
 import           Miso.Property (textProp)
 import           Miso.Effect (Sub, Sink, Effect, runEffect, io_)
+import Data.Time.Clock
+import Control.Concurrent.STM (atomically, TMVar, writeTMVar, newTMVar)
+import Debug.Trace (traceM)
+import Control.Concurrent
+import Control.Concurrent.STM (takeTMVar)
+
 -----------------------------------------------------------------------------
 -- | Helper function to abstract out initialization of @Component@ between top-level API functions.
 initialize
@@ -77,12 +84,15 @@ initialize
   => Component model action
   -> (Sink action -> JSM (MisoString, JSVal, IORef VTree))
   -- ^ Callback function is used to perform the creation of VTree
+  -> Maybe ComponentId 
+  -- ^ component parent Id
   -> JSM (IORef VTree)
-initialize Component {..} getView = do
+initialize Component {..} getView parentId = do
   Waiter {..} <- liftIO waiter
   componentActions <- liftIO (newIORef S.empty)
   let
     componentSink = \action -> liftIO $ do
+      -- traceM $ "cacher: parent: sinking action " -- <> show action
       atomicModifyIORef' componentActions $ \actions -> (actions S.|> action, ())
       serve
   (componentId, componentMount, componentVTree) <- getView componentSink
@@ -93,23 +103,67 @@ initialize Component {..} getView = do
     liftIO $ atomicModifyIORef' componentSubThreads $ \m ->
       (M.insert subKey threadId m, ())
   componentModel <- liftIO (newIORef model)
-  let
-    eventLoop !oldModel = liftIO wait >> do
-      as <- liftIO $ atomicModifyIORef' componentActions $ \actions -> (S.empty, actions)
-      newModel <- foldEffects update Async componentId componentSink (toList as) oldModel
-      oldName <- liftIO $ oldModel `seq` makeStableName oldModel
-      newName <- liftIO $ newModel `seq` makeStableName newModel
-      when (oldName /= newName && oldModel /= newModel) $ do
-        newVTree <- runView Draw (view newModel) componentSink logLevel events
+  modelToCachers <- liftIO . atomically $ newTMVar model
+  
+  let drawView !model = do 
+        newVTree <- runView Draw (view model) componentSink logLevel events (Just componentId)
         oldVTree <- liftIO (readIORef componentVTree)
         void waitForAnimationFrame
         diff (Just oldVTree) (Just newVTree) componentMount
         liftIO $ do
           atomicWriteIORef componentVTree newVTree
-          atomicWriteIORef componentModel newModel
-      syncPoint
-      eventLoop newModel
-  _ <- FFI.forkJSM (eventLoop model)
+          atomicWriteIORef componentModel model
+
+  let eventLoop !oldModel = liftIO wait >> do
+        as <- liftIO $ atomicModifyIORef' componentActions $ \actions -> (S.empty, actions)
+        newModel <- foldEffects update Async componentId componentSink (toList as) oldModel
+        oldName <- liftIO $ oldModel `seq` makeStableName oldModel
+        newName <- liftIO $ newModel `seq` makeStableName newModel
+        when (oldName /= newName && oldModel /= newModel) $ do
+          -- send changed model to all cacher components
+          liftIO . atomically . writeTMVar modelToCachers $ newModel
+          drawView newModel
+        syncPoint
+        eventLoop newModel
+
+  let sendActionsToParentLoop parentSink = liftIO wait >> do 
+        as <- liftIO $ atomicModifyIORef' componentActions $ \actions -> (S.empty, actions)
+        forM_ (toList as) parentSink
+        sendActionsToParentLoop parentSink
+
+  let cacherLoop !model = do
+        cs <- liftIO $ (readIORef components)
+        let parentState = parentId >>= \pid -> M.lookup pid cs
+        case parentState of   
+          Nothing -> do 
+            FFI.consoleError "cacher: parent component not found, cannot start cacher loop"
+            -- cacherLoop model
+          Just ps -> do
+            let parentSink = getComponentSink ps
+                parentModel = getModelToCachers ps
+            let loop oldModel last = do
+                  now <- liftIO getCurrentTime
+                  let diff = abs $ diffUTCTime now last
+                  -- update no faster than once per second
+                  if (diff > 1) then do
+                    traceM "cacher: waiting for new model" -- TODO: this thread keeps running even after cacher component is unmounted?
+                    -- wait for updated model from parent
+                    newModel <- liftIO . atomically . takeTMVar $ parentModel -- TODO: this is not going to work with multiple cachers on the same component
+                    -- let the cached component decide wheter to refresh the view
+                    traceM "cacher: got new model"
+                    when (cacherNeedsRefresh oldModel newModel) $ drawView newModel
+                    updatedAt <- liftIO getCurrentTime
+                    syncPoint
+                    loop newModel updatedAt
+                  else do
+                    liftIO . threadDelay $ (1 - (round diff)) * 10^6
+                    syncPoint -- TODO: what does this do
+                    loop oldModel last
+            _ <- FFI.forkJSM $ sendActionsToParentLoop parentSink
+            now <- liftIO getCurrentTime
+            loop model now
+
+  _ <- if isCacher then FFI.forkJSM (cacherLoop model) else FFI.forkJSM (eventLoop model)
   registerComponent ComponentState {..}
   delegator componentMount componentVTree events (logLevel `elem` [DebugEvents, DebugAll])
   forM_ initialAction componentSink
@@ -132,7 +186,14 @@ data ComponentState model action
   , componentSink       :: action -> JSM ()
   , componentModel      :: IORef model
   , componentActions    :: IORef (Seq action)
+  , modelToCachers      :: TMVar model
   }
+
+getComponentSink :: ComponentState model action -> action -> JSM ()
+getComponentSink = componentSink
+
+getModelToCachers :: ComponentState model action -> TMVar model
+getModelToCachers = modelToCachers
 -----------------------------------------------------------------------------
 -- | A 'Topic' represents a place to send and receive messages. 'Topic' is used to facilitate
 -- communication between 'Component'. 'Component' can 'subscribe' to or 'publish' to any 'Topic',
@@ -441,10 +502,11 @@ drawComponent
   :: Hydrate
   -> MisoString
   -> Component model action
+  -> Maybe ComponentId
   -> Sink action
   -> JSM (MisoString, JSVal, IORef VTree)
-drawComponent hydrate name Component {..} snk = do
-  vtree <- runView hydrate (view model) snk logLevel events
+drawComponent hydrate name Component {..} parentId snk  = do
+  vtree <- runView hydrate (view model) snk logLevel events parentId
   mountElement <- FFI.getComponent name
   when (hydrate == Draw) (diff Nothing (Just vtree) mountElement)
   ref <- liftIO (newIORef vtree)
@@ -497,12 +559,13 @@ runView
   -> Sink action
   -> LogLevel
   -> Events
+  -> Maybe ComponentId
   -> JSM VTree
-runView hydrate (VComp attrs (SomeComponent app)) snk _ _ = do
+runView hydrate (VComp attrs (SomeComponent app)) snk _ _ parentId = do
   compName <- liftIO freshComponentId
   mountCallback <- do
     FFI.syncCallback1 $ \continuation -> do
-      vtreeRef <- initialize app (drawComponent hydrate compName app)
+      vtreeRef <- initialize app (drawComponent hydrate compName app parentId) parentId
       VTree vtree <- liftIO (readIORef vtreeRef)
       void $ call continuation global [vtree]
   unmountCallback <- toJSVal =<< do
@@ -518,7 +581,7 @@ runView hydrate (VComp attrs (SomeComponent app)) snk _ _ = do
   flip (FFI.set "mount") vcomp =<< toJSVal mountCallback
   FFI.set "unmount" unmountCallback vcomp
   pure (VTree vcomp)
-runView hydrate (VNode ns tag attrs kids) snk logLevel events = do
+runView hydrate (VNode ns tag attrs kids) snk logLevel events parentId = do
   vnode <- createNode "vnode" ns tag
   setAttrs vnode attrs snk logLevel events
   vchildren <- ghcjsPure . jsval =<< procreate
@@ -529,23 +592,23 @@ runView hydrate (VNode ns tag attrs kids) snk logLevel events = do
     where
       procreate = do
         kidsViews <- forM kids $ \kid -> do
-          VTree (Object vtree) <- runView hydrate kid snk logLevel events
+          VTree (Object vtree) <- runView hydrate kid snk logLevel events parentId
           pure vtree
         ghcjsPure (JSArray.fromList kidsViews)
-runView _ (VText t) _ _ _ = do
+runView _ (VText t) _ _ _ _ = do
   vtree <- create
   FFI.set "type" ("vtext" :: JSString) vtree
   FFI.set "ns" ("text" :: JSString) vtree
   FFI.set "text" t vtree
   pure $ VTree vtree
-runView hydrate (VTextRaw str) snk logLevel events =
+runView hydrate (VTextRaw str) snk logLevel events parentId =
   case parseView str of
     [] ->
-      runView hydrate (VText (" " :: MisoString)) snk logLevel events
+      runView hydrate (VText (" " :: MisoString)) snk logLevel events parentId
     [parent] ->
-      runView hydrate parent snk logLevel events
+      runView hydrate parent snk logLevel events parentId
     kids -> do
-      runView hydrate (VNode HTML "div" mempty kids) snk logLevel events
+      runView hydrate (VNode HTML "div" mempty kids) snk logLevel events parentId
 -----------------------------------------------------------------------------
 -- | @createNode@
 -- A helper function for constructing a vtree (used for 'vcomp' and 'vnode')

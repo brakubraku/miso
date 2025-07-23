@@ -38,6 +38,7 @@ module Miso.Types
   , component
   -- ** Components
   , component_
+  , cacher
   -- ** Utils
   , getMountPoint
   -- *** Combinators
@@ -91,6 +92,10 @@ data Component model action = Component
   -- If 'Nothing' is provided, the entire document body is used as a mount point.
   , logLevel :: LogLevel
   -- ^ Debugging for prerendering and event delegation
+  , isCacher :: Bool
+  -- ^ Is this a caching component
+  , cacherNeedsRefresh :: model -> model -> Bool
+  -- ^ If this is a caching component, use this function to decide wheter to refresh the view
   }
 -----------------------------------------------------------------------------
 -- | Type to represent a DOM reference
@@ -132,6 +137,8 @@ component m u v = Component
   , mountPoint = Nothing
   , logLevel = Off
   , initialAction = Nothing
+  , isCacher = False
+  , cacherNeedsRefresh = \_ _ -> True
   }
 -----------------------------------------------------------------------------
 -- | Optional Logging for debugging miso internals (useful to see if prerendering is successful)
@@ -171,6 +178,9 @@ component_
   -> View a
 component_ app attrs = VComp attrs (SomeComponent app)
 -----------------------------------------------------------------------------
+cacher :: Eq model => (model -> model -> Bool) -> model -> (model -> View action) -> [Attribute a] -> View a
+cacher needsRefresh model view attrs = component_ (component model (const $ pure ()) view) {isCacher = True, cacherNeedsRefresh = needsRefresh} attrs
+
 -- | For constructing type-safe links
 instance HasLink (View a) where
   type MkLink (View a) b = b
