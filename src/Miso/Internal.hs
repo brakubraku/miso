@@ -126,12 +126,8 @@ initialize Component {..} getView parentId = do
         syncPoint
         eventLoop newModel
 
-  let sendActionsToParentLoop parentSink = liftIO wait >> do 
-        as <- liftIO $ atomicModifyIORef' componentActions $ \actions -> (S.empty, actions)
-        forM_ (toList as) parentSink
-        sendActionsToParentLoop parentSink
-
   let cacherLoop !model = do
+        FFI.consoleLog $ "cacher: starting cacher loop"
         cs <- liftIO $ (readIORef components)
         let parentState = parentId >>= \pid -> M.lookup pid cs
         case parentState of   
@@ -141,29 +137,38 @@ initialize Component {..} getView parentId = do
           Just ps -> do
             let parentSink = getComponentSink ps
                 parentModel = getModelToCachers ps
+            let sendActionsToParentLoop = liftIO wait >> do 
+                  as <- liftIO $ atomicModifyIORef' componentActions $ \actions -> (S.empty, actions)
+                  forM_ (toList as) parentSink
+                  sendActionsToParentLoop
             let loop oldModel last = do
                   now <- liftIO getCurrentTime
                   let diff = abs $ diffUTCTime now last
                   -- update no faster than once per second
                   if (diff > 1) then do
-                    traceM "cacher: waiting for new model" -- TODO: this thread keeps running even after cacher component is unmounted?
+                    FFI.consoleLog $ "cacher: waiting for new model with old model=" <> ms (logModel oldModel) -- TODO: this thread keeps running even after cacher component is unmounted?
                     -- wait for updated model from parent
                     newModel <- liftIO . atomically . takeTMVar $ parentModel -- TODO: this is not going to work with multiple cachers on the same component
                     -- let the cached component decide wheter to refresh the view
-                    traceM "cacher: got new model"
-                    when (cacherNeedsRefresh oldModel newModel) $ drawView newModel
-                    updatedAt <- liftIO getCurrentTime
-                    syncPoint
-                    loop newModel updatedAt
+                    FFI.consoleLog ("cacher: got new model: " <> ms (logModel newModel))
+                    case cacherNeedsRefresh oldModel newModel of 
+                     True -> do
+                      drawView newModel
+                      updatedAt <- liftIO getCurrentTime
+                      syncPoint
+                      loop newModel updatedAt
+                     _ -> do 
+                      syncPoint
+                      loop oldModel last
                   else do
                     liftIO . threadDelay $ (1 - (round diff)) * 10^6
                     syncPoint -- TODO: what does this do
                     loop oldModel last
-            _ <- FFI.forkJSM $ sendActionsToParentLoop parentSink
+            void . FFI.forkJSM $ sendActionsToParentLoop
             now <- liftIO getCurrentTime
             loop model now
 
-  _ <- if isCacher then FFI.forkJSM (cacherLoop model) else FFI.forkJSM (eventLoop model)
+  void $ if isCacher then FFI.forkJSM (cacherLoop model) else FFI.forkJSM (eventLoop model)
   registerComponent ComponentState {..}
   delegator componentMount componentVTree events (logLevel `elem` [DebugEvents, DebugAll])
   forM_ initialAction componentSink
