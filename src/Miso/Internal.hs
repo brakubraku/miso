@@ -146,11 +146,11 @@ initialize Component {..} getView parentId = do
                   let diff = abs $ diffUTCTime now last
                   -- update no faster than once per second
                   if (diff > 1) then do
-                    FFI.consoleLog $ "cacher: waiting for new model with old model=" <> ms (logModel oldModel) -- TODO: this thread keeps running even after cacher component is unmounted?
+                    FFI.consoleLog $ "cacher: waiting for new model" -- TODO: this thread keeps running even after cacher component is unmounted?
                     -- wait for updated model from parent
                     newModel <- liftIO . atomically . takeTMVar $ parentModel -- TODO: this is not going to work with multiple cachers on the same component
                     -- let the cached component decide wheter to refresh the view
-                    FFI.consoleLog ("cacher: got new model: " <> ms (logModel newModel))
+                    FFI.consoleLog "cacher: got new model"
                     case cacherNeedsRefresh oldModel newModel of 
                      True -> do
                       drawView newModel
