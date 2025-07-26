@@ -53,7 +53,7 @@ import           Language.Javascript.JSaddle hiding (Sync, Result)
 #else
 import           Language.Javascript.JSaddle
 #endif
-import           GHC.Conc (ThreadStatus(ThreadDied, ThreadFinished), threadStatus)
+import           GHC.Conc (ThreadStatus(ThreadDied, ThreadFinished), threadStatus, readTVar)
 import           Prelude hiding (null)
 import           System.IO.Unsafe (unsafePerformIO)
 import           System.Mem.StableName (makeStableName)
@@ -72,8 +72,7 @@ import           Miso.Event (Events)
 import           Miso.Property (textProp)
 import           Miso.Effect (Sub, Sink, Effect, runEffect, io_)
 import Data.Time.Clock
-import Control.Concurrent.STM (atomically, TMVar, writeTMVar, newTMVar)
-import Debug.Trace (traceM)
+import Control.Concurrent.STM (atomically, TMVar, writeTMVar, newTMVar, TVar, newTVar, modifyTVar)
 import Control.Concurrent
 import Control.Concurrent.STM (takeTMVar)
 
@@ -92,7 +91,6 @@ initialize Component {..} getView parentId = do
   componentActions <- liftIO (newIORef S.empty)
   let
     componentSink = \action -> liftIO $ do
-      -- traceM $ "cacher: parent: sinking action " -- <> show action
       atomicModifyIORef' componentActions $ \actions -> (actions S.|> action, ())
       serve
   (componentId, componentMount, componentVTree) <- getView componentSink
@@ -103,7 +101,7 @@ initialize Component {..} getView parentId = do
     liftIO $ atomicModifyIORef' componentSubThreads $ \m ->
       (M.insert subKey threadId m, ())
   componentModel <- liftIO (newIORef model)
-  modelToCachers <- liftIO . atomically $ newTMVar model
+  modelToCachers <- liftIO . atomically $ newTVar []
   
   let drawView !model = do 
         newVTree <- runView Draw (view model) componentSink logLevel events (Just componentId)
@@ -120,8 +118,9 @@ initialize Component {..} getView parentId = do
         oldName <- liftIO $ oldModel `seq` makeStableName oldModel
         newName <- liftIO $ newModel `seq` makeStableName newModel
         when (oldName /= newName && oldModel /= newModel) $ do
-          -- send changed model to all cacher components
-          liftIO . atomically . writeTMVar modelToCachers $ newModel
+          -- send changed model to all cacher children
+          cacherModels <- liftIO . atomically $ readTVar modelToCachers
+          forM_ cacherModels $ \cm -> liftIO . atomically $ writeTMVar cm newModel
           drawView newModel
         syncPoint
         eventLoop newModel
@@ -135,8 +134,10 @@ initialize Component {..} getView parentId = do
             FFI.consoleError "cacher: parent component not found, cannot start cacher loop"
             -- cacherLoop model
           Just ps -> do
+            parentModel <- liftIO . atomically $ newTMVar model
+            -- register yourself at parent as component which wants to receive model updates
+            liftIO . atomically $ modifyTVar (getModelToCachers ps) (parentModel:)
             let parentSink = getComponentSink ps
-                parentModel = getModelToCachers ps
             let sendActionsToParentLoop = liftIO wait >> do 
                   as <- liftIO $ atomicModifyIORef' componentActions $ \actions -> (S.empty, actions)
                   forM_ (toList as) parentSink
@@ -148,9 +149,9 @@ initialize Component {..} getView parentId = do
                   if (diff > 1) then do
                     FFI.consoleLog $ "cacher: waiting for new model" -- TODO: this thread keeps running even after cacher component is unmounted?
                     -- wait for updated model from parent
-                    newModel <- liftIO . atomically . takeTMVar $ parentModel -- TODO: this is not going to work with multiple cachers on the same component
+                    newModel <- liftIO . atomically . takeTMVar $ parentModel
                     -- let the cached component decide wheter to refresh the view
-                    FFI.consoleLog "cacher: got new model"
+                    FFI.consoleLog $ "cacher: got new model"
                     case cacherNeedsRefresh oldModel newModel of 
                      True -> do
                       drawView newModel
@@ -191,13 +192,13 @@ data ComponentState model action
   , componentSink       :: action -> JSM ()
   , componentModel      :: IORef model
   , componentActions    :: IORef (Seq action)
-  , modelToCachers      :: TMVar model
+  , modelToCachers      :: TVar [TMVar model]
   }
 
 getComponentSink :: ComponentState model action -> action -> JSM ()
 getComponentSink = componentSink
 
-getModelToCachers :: ComponentState model action -> TMVar model
+getModelToCachers :: ComponentState model action -> TVar [TMVar model]
 getModelToCachers = modelToCachers
 -----------------------------------------------------------------------------
 -- | A 'Topic' represents a place to send and receive messages. 'Topic' is used to facilitate
