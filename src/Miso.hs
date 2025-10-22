@@ -19,6 +19,7 @@ module Miso
     miso
   , (🍜)
   , startComponent
+  , startComponentForTest
   , renderComponent
     -- ** Sink
   , withSink
@@ -126,7 +127,14 @@ miso f = withJS $ do
 ----------------------------------------------------------------------------
 -- | Runs a miso application
 -- Initializes application at 'mountPoint' (defaults to \<body\> when @Nothing@)
-startComponent
+startComponentForTest 
+  :: Eq model
+  => Component model action
+  -- ^ Component application
+  -> JSM (Sink action)
+startComponentForTest vcomp@Component { styles } = fmap snd . withJS' $ initComponent vcomp (renderStyles styles) 
+
+startComponent 
   :: Eq model
   => Component model action
   -- ^ Component application
@@ -158,7 +166,7 @@ initComponent
   -- ^ Component application
   -> JSM ()
   -- ^ Custom hook to perform any JSM action (e.g. render styles) before initialization.
-  -> JSM (IORef VTree)
+  -> JSM (IORef VTree, Sink action)
 initComponent vcomp@Component{..} hooks = do
   flip (initialize vcomp) Nothing $ \snk -> hooks >> do
     componentId <- liftIO freshComponentId
@@ -176,8 +184,11 @@ initComponent vcomp@Component{..} hooks = do
 #endif
 -- | Used when compiling with jsaddle to make miso's JavaScript present in
 -- the execution context.
-withJS :: JSM a -> JSM ()
-withJS action = void $ do
+
+withJS = void . withJS'
+
+withJS' :: JSM a -> JSM a
+withJS' action = do
 #ifndef GHCJS_BOTH
 #ifdef WASM
   $(JSaddle.Wasm.TH.evalFile MISO_JS_PATH)

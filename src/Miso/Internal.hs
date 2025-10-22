@@ -85,7 +85,7 @@ initialize
   -- ^ Callback function is used to perform the creation of VTree
   -> Maybe ComponentId 
   -- ^ component parent Id
-  -> JSM (IORef VTree)
+  -> JSM (IORef VTree, Sink action)
 initialize Component {..} getView parentId = do
   Waiter {..} <- liftIO waiter
   componentActions <- liftIO (newIORef S.empty)
@@ -173,7 +173,7 @@ initialize Component {..} getView parentId = do
   registerComponent ComponentState {..}
   delegator componentMount componentVTree events (logLevel `elem` [DebugEvents, DebugAll])
   forM_ initialAction componentSink
-  pure componentVTree
+  pure (componentVTree, componentSink)
 -----------------------------------------------------------------------------
 -- | 'Hydrate' avoids calling @diff@, and instead calls @hydrate@
 -- 'Draw' invokes 'diff'
@@ -571,7 +571,7 @@ runView hydrate (VComp attrs (SomeComponent app)) snk _ _ parentId = do
   compName <- liftIO freshComponentId
   mountCallback <- do
     FFI.syncCallback1 $ \continuation -> do
-      vtreeRef <- initialize app (drawComponent hydrate compName app parentId) parentId
+      (vtreeRef, _) <- initialize app (drawComponent hydrate compName app parentId) parentId
       VTree vtree <- liftIO (readIORef vtreeRef)
       void $ call continuation global [vtree]
   unmountCallback <- toJSVal =<< do
